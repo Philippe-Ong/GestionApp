@@ -118,6 +118,14 @@ const generateId = () => {
     }
     return '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 };
+
+const debounce = (fn, ms) => {
+    let timer = null;
+    return (...args) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { timer = null; fn(...args); }, ms);
+    };
+};
 const formatDate = (date) => new Date(date).toLocaleDateString('fr-CH');
 const formatDateTime = (date) => new Date(date).toLocaleString('fr-CH');
 const formatTime = (time) => time.substring(0, 5);
@@ -977,7 +985,7 @@ const renderStock = () => {
             <input type="search"
                    placeholder="Rechercher un lot, arôme, format…"
                    value="${escapeHtml(savedQuery)}"
-                   oninput="DB.setFilter('stockQuery', this.value); renderStock(); document.querySelector('.stock-search input')?.focus();">
+                   oninput="onStockSearchInput(this)">
         </div>
 
         <div class="aroma-tile-grid">
@@ -1035,6 +1043,12 @@ const renderStock = () => {
     
     safeRender(html);
 };
+
+// Debounced search handler — one render per typing pause instead of one per keystroke
+const onStockSearchInput = debounce((input) => {
+    DB.setFilter('stockQuery', input.value);
+    renderStock();
+}, 150);
 
 // Toggles de filtres Stock (clic sur la pill active = retire le filtre)
 const toggleStockAromeFilter = (aromeNom) => {
@@ -4314,7 +4328,9 @@ const renderProduction = () => {
     productionPlannerState = {
         productionNecesaire,
         litresParArome,
-        cuvesParArome
+        cuvesParArome,
+        aromeByNom: new Map(aromes.map(a => [a.nom, a])),
+        recetteByAromeId: new Map(recettes.map(r => [r.aromeId, r]))
     };
 
     // Render results
@@ -4497,10 +4513,8 @@ const ajusterCuves = (aromeNom, cuveIndex, nouvelleValeur) => {
         }
     }
 
-    const aromes = DB.get('aromes') || [];
-    const recettes = DB.get('recettes') || [];
-    const arome = aromes.find(a => a.nom === aromeNom);
-    const recette = recettes.find(r => r.aromeId === arome?.id);
+    const arome = state.aromeByNom.get(aromeNom);
+    const recette = arome ? state.recetteByAromeId.get(arome.id) : null;
 
     cuves.forEach(cuve => {
         cuve.ingredients = calculerIngredientsCuve(recette, cuve.litres);
@@ -4900,7 +4914,7 @@ const renderInventaire = () => {
             </div>
             <div class="inv-stepper">
                 <button class="inv-stepper-btn" onclick="updateInventaireQty('${item.id}', -1)" aria-label="Diminuer">−</button>
-                <span class="inv-stepper-qty">${item.quantite}<span class="inv-stepper-unit">${escapeHtml(item.unite || '')}</span></span>
+                <span class="inv-stepper-qty" id="inv-qty-${item.id}">${item.quantite}<span class="inv-stepper-unit">${escapeHtml(item.unite || '')}</span></span>
                 <button class="inv-stepper-btn" onclick="updateInventaireQty('${item.id}', 1)" aria-label="Augmenter">+</button>
             </div>
             <button class="inv-edit-btn" onclick="showInventaireModal('${categorie}', '${item.id}')" aria-label="Modifier" title="Modifier">✎</button>
@@ -5028,15 +5042,42 @@ const saveInventaireItem = (event, id) => {
     renderInventaire();
 };
 
+// Debounce Firebase sync for inventaire stepper — rapid +/- clicks coalesce into one write per burst.
+// localStorage is always written immediately (sync, cheap) so the data is never lost on navigation.
+let inventaireSyncTimer = null;
+let inventaireSyncPending = null;
+const flushInventaireSync = () => {
+    if (inventaireSyncPending) {
+        DB.syncToFirebase('inventaire', inventaireSyncPending);
+        inventaireSyncPending = null;
+    }
+    inventaireSyncTimer = null;
+};
+
 // Update inventaire quantity
 const updateInventaireQty = (id, delta) => {
     const items = DB.get('inventaire');
     const item = items.find(i => i.id === id);
-    if (item) {
-        item.quantite = Math.max(0, (item.quantite || 0) + delta);
-        DB.set('inventaire', items);
-        renderInventaire();
+    if (!item) return;
+    const newQty = Math.max(0, (item.quantite || 0) + delta);
+    item.quantite = newQty;
+
+    const qtyEl = document.getElementById('inv-qty-' + id);
+    if (qtyEl) qtyEl.firstChild.nodeValue = newQty;
+
+    try {
+        localStorage.setItem('thecol_inventaire', JSON.stringify(items));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+            showToast('Stockage local plein.', 'warning');
+        } else {
+            console.error('inventaire localStorage error', e);
+        }
     }
+
+    inventaireSyncPending = items;
+    if (inventaireSyncTimer) clearTimeout(inventaireSyncTimer);
+    inventaireSyncTimer = setTimeout(flushInventaireSync, 500);
 };
 
 // Delete inventaire item
