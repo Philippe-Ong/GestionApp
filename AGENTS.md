@@ -6,7 +6,7 @@ Guidance for agentic coding agents working in this repository.
 
 ThéCol Gestion is a single-page business management app for a cold tea company. The entire UI is in French. It is hosted on GitHub Pages with **no build step, no bundler, and no framework**. The application logic relies entirely on vanilla JavaScript, HTML, and CSS.
 
-**Current Version:** v6.16
+**Current Version:** v8.1
 
 ## 1. Build, Lint, and Test Commands
 
@@ -76,7 +76,7 @@ Every page has a top-level `const render<Page> = () => { ... }` arrow function t
 - **Functions**: Use arrow functions for all declarations (`const fn = () => { }`).
 - **Strings**: Use template literals (backticks) for all multi-line HTML strings. Maintain proper indentation.
 - **Dates**: Format with Swiss French locale: `fr-CH` via `toLocaleDateString('fr-CH')`.
-- **IDs**: Use `generateId()` — returns `'_' + Math.random().toString(36).substr(2, 9)`.
+- **IDs**: Use `generateId()` — uses `crypto.randomUUID()` when available, falling back to `'_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)`.
 - **Comments**: Keep code clean. No comments unless the user asks for them.
 
 ### Error Handling

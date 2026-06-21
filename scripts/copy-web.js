@@ -4,7 +4,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const www = path.join(root, 'www');
 
-const FILES = ['index.html', 'app.js', 'styles.css', 'stress-test.js'];
+const FILES = ['index.html', 'app.js', 'styles.css'];
 const DIRS = ['templates'];
 
 fs.mkdirSync(www, { recursive: true });

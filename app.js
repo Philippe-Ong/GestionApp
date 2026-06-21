@@ -447,7 +447,12 @@ const calculateDates = (productionDate) => {
 
 const escapeHtml = (str) => {
     if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 };
 
 const dateOnly = (d) => {
@@ -914,7 +919,7 @@ const renderStock = () => {
         </a>
         ${tileAromas.map(a => `
             <a href="#stock" class="aroma-tile ${savedArome === a.nom ? 'active' : ''}"
-               onclick="event.preventDefault(); toggleStockAromeFilter('${escapeHtml(a.nom).replace(/'/g, '\\\'')}'); return false;">
+               onclick="event.preventDefault(); toggleStockAromeFilter('${escapeHtml(a.nom)}'); return false;">
                 <div class="aroma-tile-header">
                     <span class="aroma-tile-dot" style="background:${escapeHtml(a.couleur || '#ccc')}"></span>
                     <span class="aroma-tile-name">${escapeHtml(a.nom)}</span>
@@ -926,7 +931,7 @@ const renderStock = () => {
     `;
 
     // Pills formats + statuts
-    const fmtPill = (val, label) => `<button type="button" class="status-pill ${savedFormat === val ? 'active' : ''}" onclick="toggleStockFormatFilter('${escapeHtml(val).replace(/'/g, '\\\'')}')">${escapeHtml(label)}</button>`;
+    const fmtPill = (val, label) => `<button type="button" class="status-pill ${savedFormat === val ? 'active' : ''}" onclick="toggleStockFormatFilter('${escapeHtml(val)}')">${escapeHtml(label)}</button>`;
     const statPill = (val, label) => `<button type="button" class="status-pill ${savedStatut === val ? 'active' : ''}" onclick="toggleStockStatutFilter('${val}')">${escapeHtml(label)}</button>`;
 
     const lotCardsHtml = filteredLots.length === 0
