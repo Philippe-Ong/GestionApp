@@ -22,13 +22,11 @@
     /* === Statuts foreground (anciennes vars, valeurs conservées pour compat app.js) === */
     --danger: #C0392B;
     --danger-dark: #A93226;
-    --danger-light: #E74C3C;
     --warning: #F39C12;
     --warning-dark: #D68910;
     --warning-light: #F1C40F;
     --success: #27AE60;
     --success-dark: #229954;
-    --success-light: #2ECC71;
 
     /* === Statuts (paires bg/fg du Design System) === */
     --success-bg: #B8D4A0;
@@ -53,28 +51,21 @@
     --radius-sm: 4px;
     --radius-lg: 12px;
     /* === Radius (Design System) === */
-    --radius-xs: 6px;
     --radius-md: 10px;
     --radius-card: 12px;
     --radius-card-lg: 16px;
     --radius-pill: 20px;
 
     /* === Échelle espacement (base 4dp) === */
-    --space-1: 4px;
-    --space-2: 8px;
     --space-3: 12px;
     --space-4: 16px;
     --space-5: 20px;
-    --space-6: 24px;
-    --space-8: 32px;
-    --space-12: 48px;
 
     /* === Typographie (tailles en px ≈ sp Android) === */
     --font-display: 38px;
     --font-h1: 28px;
     --font-h2: 26px;
     --font-h3: 22px;
-    --font-title: 16px;
     --font-body-lg: 15px;
     --font-body: 13px;
     --font-caption: 12px;
@@ -1555,7 +1546,6 @@ input[type="checkbox"] {
     /* Tables - horizontal scroll with sticky first column */
     .table-container {
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
         margin-left: -12px;
         margin-right: -12px;
         padding-left: 12px;
@@ -1807,7 +1797,6 @@ input[type="checkbox"] {
     .tabs {
         display: flex;
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
         gap: 4px;
         padding-bottom: 4px;
     }
@@ -1964,45 +1953,6 @@ input[type="checkbox"] {
     }
 
     .inventaire-item-name {
-        width: 100%;
-        margin-bottom: 2px;
-    }
-
-    .inventaire-qty-controls {
-        flex: 1;
-    }
-
-    .inventaire-qty-controls .btn {
-        width: 40px;
-        height: 40px;
-        font-size: 18px;
-    }
-
-    .inventaire-item-actions .btn {
-        width: 40px;
-        height: 40px;
-        font-size: 14px;
-    }
-
-    /* Nav items - close sidebar on tap */
-    .nav-item {
-        padding: 14px 16px;
-        min-height: 44px;
-    }
-
-    /* Inventaire */
-    .inventaire-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
-    }
-
-    .inventaire-item {
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 10px;
-    }
-
-    .inventaire-item-name {
         flex: 1 1 100%;
         font-size: 14px;
     }
@@ -2060,57 +2010,6 @@ input[type="checkbox"] {
     .form-group-btn-end .btn {
         width: 100%;
     }
-}
-
-/* Production cuve sliders */
-.cuve-slider-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 8px 0;
-}
-
-.cuve-slider {
-    flex: 1;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--border);
-    outline: none;
-    -webkit-appearance: none;
-    appearance: none;
-}
-
-.cuve-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid var(--primary-dark);
-    transition: transform 0.15s ease;
-}
-
-.cuve-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
-}
-
-.cuve-slider::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid var(--primary-dark);
-}
-
-.cuve-litres-display {
-    min-width: 52px;
-    text-align: right;
-    font-weight: 600;
-    color: var(--primary);
-    font-size: 14px;
 }
 
 /* Production cuve sliders */

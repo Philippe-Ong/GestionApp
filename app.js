@@ -461,12 +461,9 @@ const dateOnly = (d) => {
     return dt;
 };
 
-const getStatus = (dlc) => {
-    const now = dateOnly(new Date());
+const getStatus = (dlc, now, oneMonthFromNow) => {
+    if (!dlc) return 'ok';
     const dlcDate = dateOnly(dlc);
-    const oneMonthFromNow = dateOnly(new Date());
-    oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
-    
     if (now > dlcDate) return 'expired';
     if (dlcDate <= oneMonthFromNow) return 'warning';
     return 'ok';
@@ -648,9 +645,9 @@ window.addEventListener('unhandledrejection', (e) => {
 
 // Cross-tab synchronization
 window.addEventListener('storage', (e) => {
-    if (e.key && e.key.startsWith('thecol_')) {
-        renderCurrentView();
-    }
+    if (!e.key || !e.key.startsWith('thecol_')) return;
+    if (e.key.startsWith('thecol_filter_') || e.key.startsWith('thecol_show_')) return;
+    renderCurrentView();
 });
 
 window.addEventListener('hashchange', router);
@@ -878,6 +875,11 @@ const renderStock = () => {
     const savedFormat = DB.getFilter('stockFormat') || '';
     const savedStatut = DB.getFilter('stockStatut') || '';
 
+    // Statut DLC : dates hoistées (utilisées pour chaque lot)
+    const statusRefDate = dateOnly(new Date());
+    const statusWarnDate = new Date(statusRefDate);
+    statusWarnDate.setMonth(statusWarnDate.getMonth() + 1);
+
     // Calculs globaux
     const sellableBottles = lots
         .filter(lot => lot.dlc && new Date(lot.dlc) >= today)
@@ -898,7 +900,7 @@ const renderStock = () => {
         if (savedArome  && lot.arome  !== savedArome)  return false;
         if (savedFormat && lot.format !== savedFormat) return false;
         if (savedStatut) {
-            const st = getStatus(lot.dlc);
+            const st = getStatus(lot.dlc, statusRefDate, statusWarnDate);
             if (st !== savedStatut) return false;
         }
         if (savedQuery) {
@@ -938,7 +940,7 @@ const renderStock = () => {
         ? '<div class="commande-empty">Aucun lot ne correspond aux filtres</div>'
         : filteredLots.map(lot => {
             const arome = aromes.find(a => a.nom === lot.arome);
-            const status = getStatus(lot.dlc);
+            const status = getStatus(lot.dlc, statusRefDate, statusWarnDate);
             const badgeClass = status === 'expired' ? 'badge-expire' : status === 'warning' ? 'badge-bientot' : 'badge-ok';
             const statusLabel = status === 'expired' ? 'Expiré' : status === 'warning' ? '< 1 mois' : 'OK';
             return `<div class="lot-card lot-status-${status}">
@@ -1248,55 +1250,6 @@ const deleteLot = (id) => {
         showToast('Lot supprimé');
         renderStock();
     });
-};
-
-const renderSellableSummary = (lots, aromes, formats, today) => {
-    if (!lots || lots.length === 0) return '';
-    
-    const sellableLots = lots.filter(lot => getStatus(lot.dlc) === 'ok');
-    
-    if (sellableLots.length === 0) return '';
-    if (!aromes || aromes.length === 0) return '';
-    
-    const summary = aromes.filter(a => a && a.actif).map(arome => {
-        const formatsData = (formats || []).filter(f => f && f.actif).map(format => {
-            const total = sellableLots
-                .filter(l => l.arome === arome.nom && l.format === format.nom)
-                .reduce((sum, l) => sum + l.quantite, 0);
-            return { format: format.nom, total };
-        }).filter(f => f.total > 0);
-        
-        const totalArome = formatsData.reduce((sum, f) => sum + f.total, 0);
-        return { arome: arome.nom, couleur: arome.couleur, formats: formatsData, total: totalArome };
-    }).filter(item => item.total > 0);
-    
-    if (summary.length === 0) return '';
-    
-    return `
-        <div class="card" style="margin-bottom: 24px;">
-            <h3 class="card-title" style="margin-bottom: 16px;">Stock vendable</h3>
-            <div class="sellable-grid">
-                ${summary.map(item => `
-                    <div class="sellable-item">
-                        <div class="sellable-header">
-                            <span class="color-dot" style="background: ${escapeHtml(item.couleur || '#5D7B3E')}"></span>
-                            <strong>${escapeHtml(item.arome)}</strong>
-                            <span class="badge badge-success">${item.total} bt</span>
-                        </div>
-                        <div class="sellable-formats">
-                            ${item.formats.map(f => `
-                                <span>${escapeHtml(f.format)}: <strong>${f.total}</strong></span>
-                            `).join('')}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-    `;
-};
-
-const isSellable = (lot) => {
-    return new Date(lot.dlc) >= new Date();
 };
 
 const showVendreModal = (lotId) => {
