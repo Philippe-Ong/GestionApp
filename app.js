@@ -126,6 +126,10 @@ const debounce = (fn, ms) => {
         timer = setTimeout(() => { timer = null; fn(...args); }, ms);
     };
 };
+
+// Index un tableau par id (O(n)) — permet lookups O(1) dans les boucles de rendu
+const indexById = (arr) => new Map((arr || []).map(x => [x.id, x]));
+const indexBy = (arr, keyFn) => new Map((arr || []).map(x => [keyFn(x), x]));
 const formatDate = (date) => new Date(date).toLocaleDateString('fr-CH');
 const formatDateTime = (date) => new Date(date).toLocaleString('fr-CH');
 const formatTime = (time) => time.substring(0, 5);
@@ -2172,20 +2176,25 @@ const formatChf = (n) => {
 //   3. Si item.formatId ressemble à un nom de format ("25cl"), match par nom
 //   4. Parse "0.5L" / "33cl" depuis le formatId/nom comme dernier recours
 // Retourne { format, source } ou null si introuvable.
-const resolveCommandeFormat = (item, formats) => {
+const resolveCommandeFormat = (item, formats, lookups = null) => {
     if (!item) return null;
+    const lk = lookups || (Array.isArray(formats) ? {
+        formatsById: indexById(formats),
+        formatsByNom: indexBy(formats, f => f.nom),
+        formatsByNorm: indexBy(formats, f => String(f.nom || '').toLowerCase().replace(/\s+/g, ''))
+    } : null);
     // 1. match par id (strict)
-    let fmt = formats.find(f => f.id === item.formatId);
+    let fmt = lk ? lk.formatsById.get(item.formatId) : formats.find(f => f.id === item.formatId);
     if (fmt) return { format: fmt, source: 'id' };
     // 2. match par formatNom (si stocké dans l'item legacy)
     if (item.formatNom) {
-        fmt = formats.find(f => f.nom === item.formatNom);
+        fmt = lk ? lk.formatsByNom.get(item.formatNom) : formats.find(f => f.nom === item.formatNom);
         if (fmt) return { format: fmt, source: 'formatNom' };
     }
     // 3. match par formatId qui ressemblerait à un nom ("25cl", "1L", etc.)
     if (item.formatId) {
         const norm = String(item.formatId).toLowerCase().replace(/\s+/g, '');
-        fmt = formats.find(f => String(f.nom || '').toLowerCase().replace(/\s+/g, '') === norm);
+        fmt = lk ? lk.formatsByNorm.get(norm) : formats.find(f => String(f.nom || '').toLowerCase().replace(/\s+/g, '') === norm);
         if (fmt) return { format: fmt, source: 'formatId-as-name' };
     }
     return null;
@@ -2193,8 +2202,15 @@ const resolveCommandeFormat = (item, formats) => {
 
 // Diagnostic : retourne un objet structuré du calcul de montant pour une commande.
 // Utilisé par l'UI ("Pourquoi pas de montant ?") et par window.debugMontants().
-const diagnoseCommandeMontant = (commande, clients, formats) => {
-    const client = clients.find(c => c.id === commande.clientId);
+// Accepte des lookups (Maps) en option pour eviter les Array.find dans les boucles de rendu.
+const diagnoseCommandeMontant = (commande, clients, formats, lookups = null) => {
+    const lk = lookups || (Array.isArray(clients) && Array.isArray(formats) ? {
+        clientsById: indexById(clients),
+        formatsById: indexById(formats),
+        formatsByNom: indexBy(formats, f => f.nom),
+        formatsByNorm: indexBy(formats, f => String(f.nom || '').toLowerCase().replace(/\s+/g, ''))
+    } : null);
+    const client = lk ? lk.clientsById.get(commande.clientId) : clients.find(c => c.id === commande.clientId);
     const report = {
         cmdId: commande.id,
         cmdNumero: getCommandeNumero(commande),
@@ -2208,7 +2224,7 @@ const diagnoseCommandeMontant = (commande, clients, formats) => {
     };
     if (!client) return report;
     getItems(commande).forEach((item, idx) => {
-        const resolved = resolveCommandeFormat(item, formats);
+        const resolved = resolveCommandeFormat(item, formats, lk);
         const fmt = resolved?.format;
         const key = fmt ? getFormatPriceKey(fmt) : null;
         const rawClient = key ? client[key] : null;
@@ -2249,8 +2265,8 @@ const diagnoseCommandeMontant = (commande, clients, formats) => {
 
 // Calcule le montant CHF total d'une commande depuis les prix du client.
 // Délègue le diagnostic et utilise le résultat — source unique de vérité.
-const getCommandeMontant = (commande, clients, formats) => {
-    const r = diagnoseCommandeMontant(commande, clients, formats);
+const getCommandeMontant = (commande, clients, formats, lookups = null) => {
+    const r = diagnoseCommandeMontant(commande, clients, formats, lookups);
     return r.hasPrice ? r.total : null;
 };
 
@@ -2376,6 +2392,13 @@ const renderCommandes = () => {
     const clients = DB.get('clients') || [];
     const aromes = DB.get('aromes') || [];
     const formats = DB.get('formats') || [];
+    const lookups = {
+        clientsById: indexById(clients),
+        aromesById: indexById(aromes),
+        formatsById: indexById(formats),
+        formatsByNom: indexBy(formats, f => f.nom),
+        formatsByNorm: indexBy(formats, f => String(f.nom || '').toLowerCase().replace(/\s+/g, ''))
+    };
 
     // Compteurs par statut (avant filtres) pour les pills
     const countByStatut = { en_attente: 0, produite: 0, 'livrée': 0, annulee: 0 };
@@ -2411,17 +2434,17 @@ const renderCommandes = () => {
     const cardsHtml = filtered.length === 0
         ? '<div class="commande-empty">Aucune commande</div>'
         : filtered.map(cmd => {
-            const client = clients.find(cl => cl.id === cmd.clientId);
+            const client = lookups.clientsById.get(cmd.clientId);
             const clientLabel = client?.societe || client?.nom || 'Client inconnu';
             const safeItems = cmd.items || [];
             const totalItems = safeItems.reduce((sum, i) => sum + (i.quantite || 0), 0);
             const articlesPreview = safeItems.slice(0, 3).map(i => {
-                const a = aromes.find(a => a.id === i.aromeId);
-                const f = formats.find(f => f.id === i.formatId);
+                const a = lookups.aromesById.get(i.aromeId);
+                const f = lookups.formatsById.get(i.formatId);
                 return `${i.quantite}× ${a?.nom || '?'} ${f?.nom || '?'}`;
             }).join(' • ');
             const more = safeItems.length > 3 ? ` • +${safeItems.length - 3}` : '';
-            const montant = getCommandeMontant(cmd, clients, formats);
+            const montant = getCommandeMontant(cmd, clients, formats, lookups);
             const badgeMap = {
                 'en_attente': 'badge-en-attente',
                 'produite':   'badge-produite',
@@ -3289,9 +3312,14 @@ const renderArchives = () => {
     const clients = DB.get('clients') || [];
     const aromes = DB.get('aromes') || [];
     const formats = DB.get('formats') || [];
-    
+    const lookups = {
+        clientsById: indexById(clients),
+        aromesById: indexById(aromes),
+        formatsById: indexById(formats)
+    };
+
     const years = [...new Set(commandes.map(c => c.dateCommande ? c.dateCommande.substring(0, 4) : '2024'))].sort().reverse();
-    
+
     const filteredCommandes = commandes.filter(c => {
         const year = c.dateCommande ? c.dateCommande.substring(0, 4) : '2024';
         const matchesYear = !savedFilterYear || year === savedFilterYear;
@@ -3336,12 +3364,12 @@ const renderArchives = () => {
                         ${filteredCommandes.length === 0 ? '<tr><td colspan="6" class="text-center">Aucune commande archivée</td></tr>' : 
                           filteredCommandes.sort((a, b) => new Date(b.dateCommande) - new Date(a.dateCommande))
                             .map(cmd => {
-                                const client = clients.find(cl => cl.id === cmd.clientId);
+                                const client = lookups.clientsById.get(cmd.clientId);
                                 const safeItems = cmd.items || [];
                                 const totalItems = safeItems.reduce((sum, i) => sum + i.quantite, 0);
                                 const articlesPreview = safeItems.slice(0, 2).map(i => {
-                                    const a = aromes.find(a => a.id === i.aromeId);
-                                    const f = formats.find(f => f.id === i.formatId);
+                                    const a = lookups.aromesById.get(i.aromeId);
+                                    const f = lookups.formatsById.get(i.formatId);
                                     return escapeHtml(`${i.quantite}x ${a?.nom || '?'} ${f?.nom || '?'}`);
                                 }).join(', ');
 
@@ -3466,9 +3494,11 @@ const getLivraisonByCommandeId = (commandeId, livraisons = null) => {
 const getCommandesEligibleBL = (commandes = null, livraisons = null) => {
     const allCommandes = commandes || DB.get('commandes') || [];
     const allLivraisons = livraisons || DB.get('livraisons') || [];
+    // Set des commandeId ayant deja un BL : O(C+L) au lieu de O(C*L) avec find
+    const blCommandeIds = new Set(allLivraisons.map(l => l.commandeId));
     return allCommandes.filter(cmd =>
         (cmd.statut === 'produite' || cmd.statut === 'livrée') &&
-        !getLivraisonByCommandeId(cmd.id, allLivraisons)
+        !blCommandeIds.has(cmd.id)
     );
 };
 
@@ -3563,7 +3593,15 @@ const renderLivraisons = () => {
     const clients = DB.get('clients') || [];
     const aromes = DB.get('aromes') || [];
     const formats = DB.get('formats') || [];
-    
+    const lookups = {
+        clientsById: indexById(clients),
+        aromesById: indexById(aromes),
+        formatsById: indexById(formats),
+        formatsByNom: indexBy(formats, f => f.nom),
+        formatsByNorm: indexBy(formats, f => String(f.nom || '').toLowerCase().replace(/\s+/g, '')),
+        commandesById: indexById(commandes)
+    };
+
     const savedFilterYear = DB.getFilter('livraison_year');
     const savedFilterClient = DB.getFilter('livraison_client');
     const hasActiveFilters = !!savedFilterYear || !!savedFilterClient;
@@ -3669,13 +3707,13 @@ const renderLivraisons = () => {
                         ${filteredLivraisons.length === 0 ? `<tr><td colspan="6" class="text-center">${emptyMessage}</td></tr>` : 
                           filteredLivraisons.sort((a, b) => new Date(b.dateBL) - new Date(a.dateBL))
                             .map(liv => {
-                                const commande = commandes.find(c => c.id === liv.commandeId);
-                                const client = clients.find(cl => cl.id === liv.clientId);
+                                const commande = lookups.commandesById.get(liv.commandeId);
+                                const client = lookups.clientsById.get(liv.clientId);
                                 const lignes = Array.isArray(liv.lignes) ? liv.lignes : [];
                                 const totalItems = lignes.reduce((sum, l) => sum + l.quantite, 0);
                                 const articlesPreview = lignes.slice(0, 2).map(l => {
-                                    const a = aromes.find(a => a.id === l.aromeId);
-                                    const f = formats.find(f => f.id === l.formatId);
+                                    const a = lookups.aromesById.get(l.aromeId);
+                                    const f = lookups.formatsById.get(l.formatId);
                                     return escapeHtml(`${l.quantite}x ${a?.nom || '?'} ${f?.nom || '?'}`);
                                 }).join(', ');
 
