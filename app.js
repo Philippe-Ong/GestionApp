@@ -130,6 +130,59 @@ const debounce = (fn, ms) => {
 // Index un tableau par id (O(n)) — permet lookups O(1) dans les boucles de rendu
 const indexById = (arr) => new Map((arr || []).map(x => [x.id, x]));
 const indexBy = (arr, keyFn) => new Map((arr || []).map(x => [keyFn(x), x]));
+
+// Sub-renderer Livraisons : card "Commandes livrées sans BL" (separee du reste
+// pour permettre un re-render cible apres creation/suppression de BL).
+const renderLivraisonsSansBLCard = (commandesLivreesSansBL, lookups) => {
+    if (commandesLivreesSansBL.length === 0) return '';
+    return `
+        <div class="card mt-4" id="livraisonsSansBLCard">
+            <div class="card-header">
+                <h3 class="card-title">Commandes livrées sans BL</h3>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>No Commande</th>
+                            <th>Client</th>
+                            <th>Date livraison</th>
+                            <th>Articles</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${commandesLivreesSansBL.map(cmd => {
+                            const client = lookups.clientsById.get(cmd.clientId);
+                            const totalItems = getItems(cmd).reduce((sum, item) => sum + (item.quantite || 0), 0);
+                            const articlesPreview = getItems(cmd).slice(0, 2).map(item => {
+                                const a = lookups.aromesById.get(item.aromeId);
+                                const f = lookups.formatsById.get(item.formatId);
+                                return escapeHtml(`${item.quantite}x ${a?.nom || '?'} ${f?.nom || '?'}`);
+                            }).join(', ');
+
+                            return `
+                                <tr>
+                                    <td>#${getCommandeNumero(cmd)}</td>
+                                    <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
+                                    <td>${cmd.dateLivraison || cmd.dateCommande ? formatDate(cmd.dateLivraison || cmd.dateCommande) : '-'}</td>
+                                    <td>${articlesPreview}${getItems(cmd).length > 2 ? '...' : ''} (${totalItems})</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" onclick="createBLFromCommande('${cmd.id}')">Créer le BL</button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+};
+
+// Cache pour le modal de commande : evite 2x DB.get par touche dans la matrice
+// (clients, formats, aromes sont stables tant que le modal est ouvert)
+let _commandeModalCache = null;
 const formatDate = (date) => new Date(date).toLocaleDateString('fr-CH');
 const formatDateTime = (date) => new Date(date).toLocaleString('fr-CH');
 const formatTime = (time) => time.substring(0, 5);
@@ -556,6 +609,8 @@ const modal = {
             modal._previouslyFocused.focus();
             modal._previouslyFocused = null;
         }
+        // Libere le cache snapshot du modal de commande
+        if (typeof _commandeModalCache !== 'undefined') _commandeModalCache = null;
     }
 };
 
@@ -2528,6 +2583,9 @@ const showCommandeModal = (id = null) => {
         return;
     }
 
+    // Snapshot pour les handlers du modal (evite les DB.get par touche)
+    _commandeModalCache = { clients, formats, aromes, commande };
+
     const matrixRows = aromes.map(a => {
         const dotColor = a.couleur || '#ccc';
         return `<tr>
@@ -2620,8 +2678,10 @@ const updateCommandeTotalModal = () => {
     const form = document.getElementById('commandeForm');
     if (!form) return;
     const clientId = form.querySelector('select[name="clientId"]')?.value;
-    const clients = DB.get('clients') || [];
-    const formats = DB.get('formats') || [];
+    // Lecture depuis le cache modal si dispo, sinon fallback DB (defense en profondeur)
+    const cache = _commandeModalCache;
+    const clients = cache?.clients || DB.get('clients') || [];
+    const formats = cache?.formats || DB.get('formats') || [];
 
     // Construire un objet commande "virtuel" depuis les inputs
     const items = [];
@@ -3626,49 +3686,7 @@ const renderLivraisons = () => {
         ? 'Aucun bulletin de livraison créé pour le moment'
         : 'Aucun bulletin ne correspond aux filtres sélectionnés';
 
-    const commandesSansBLHtml = commandesLivreesSansBL.length === 0 ? '' : `
-        <div class="card mt-4">
-            <div class="card-header">
-                <h3 class="card-title">Commandes livrées sans BL</h3>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>No Commande</th>
-                            <th>Client</th>
-                            <th>Date livraison</th>
-                            <th>Articles</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${commandesLivreesSansBL.map(cmd => {
-                            const client = clients.find(cl => cl.id === cmd.clientId);
-                            const totalItems = getItems(cmd).reduce((sum, item) => sum + (item.quantite || 0), 0);
-                            const articlesPreview = getItems(cmd).slice(0, 2).map(item => {
-                                const a = aromes.find(a => a.id === item.aromeId);
-                                const f = formats.find(f => f.id === item.formatId);
-                                return escapeHtml(`${item.quantite}x ${a?.nom || '?'} ${f?.nom || '?'}`);
-                            }).join(', ');
-
-                            return `
-                                <tr>
-                                    <td>#${getCommandeNumero(cmd)}</td>
-                                    <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
-                                    <td>${cmd.dateLivraison || cmd.dateCommande ? formatDate(cmd.dateLivraison || cmd.dateCommande) : '-'}</td>
-                                    <td>${articlesPreview}${getItems(cmd).length > 2 ? '...' : ''} (${totalItems})</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary" onclick="createBLFromCommande('${cmd.id}')">Créer le BL</button>
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    `;
+    const commandesSansBLHtml = renderLivraisonsSansBLCard(commandesLivreesSansBL, lookups);
     
     let html = `
         <div class="card">
@@ -5144,21 +5162,8 @@ const renderParametres = () => {
                     <h3>Employés</h3>
                     <button class="btn btn-sm btn-primary" onclick="showEmployeModal()">+ Ajouter</button>
                 </div>
-                <ul class="settings-list">
-                    ${employes.length === 0 ? '<li class="settings-item text-muted">Aucun employé</li>' : 
-                      employes.map(e => `
-                        <li class="settings-item">
-                            <div class="settings-item-info">
-                                <span class="color-dot" style="background: var(--primary)"></span>
-                                <span>${escapeHtml(e.prenom)} ${escapeHtml(e.nom)}</span>
-                                <span class="badge ${e.actif ? 'badge-success' : 'badge-default'}">${e.actif ? 'Actif' : 'Inactif'}</span>
-                            </div>
-                            <div class="settings-item-actions">
-                                <button class="btn btn-sm btn-secondary" onclick="showEmployeModal('${e.id}')">Modifier</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteEmploye('${e.id}')">Supprimer</button>
-                            </div>
-                        </li>
-                      `).join('')}
+                <ul class="settings-list" id="settings-employes-list">
+                    ${renderSettingsEmployes()}
                 </ul>
             </div>
             
@@ -5167,21 +5172,8 @@ const renderParametres = () => {
                     <h3>Arômes</h3>
                     <button class="btn btn-sm btn-primary" onclick="showAromeModal()">+ Ajouter</button>
                 </div>
-                <ul class="settings-list">
-                    ${aromes.length === 0 ? '<li class="settings-item text-muted">Aucun arôme</li>' : 
-                      aromes.map(a => `
-                        <li class="settings-item">
-                            <div class="settings-item-info">
-                                <span class="color-dot" style="background: ${escapeHtml(a.couleur || '#ccc')}"></span>
-                                <span>${escapeHtml(a.nom)}</span>
-                                <span class="badge ${a.actif ? 'badge-success' : 'badge-default'}">${a.actif ? 'Actif' : 'Inactif'}</span>
-                            </div>
-                            <div class="settings-item-actions">
-                                <button class="btn btn-sm btn-secondary" onclick="showAromeModal('${a.id}')">Modifier</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteArome('${a.id}')">Supprimer</button>
-                            </div>
-                        </li>
-                      `).join('')}
+                <ul class="settings-list" id="settings-aromes-list">
+                    ${renderSettingsAromes()}
                 </ul>
             </div>
             
@@ -5190,21 +5182,8 @@ const renderParametres = () => {
                     <h3>Formats</h3>
                     <button class="btn btn-sm btn-primary" onclick="showFormatModal()">+ Ajouter</button>
                 </div>
-                <ul class="settings-list">
-                    ${formats.length === 0 ? '<li class="settings-item text-muted">Aucun format</li>' : 
-                      formats.map(f => `
-                        <li class="settings-item">
-                            <div class="settings-item-info">
-                                <span>${escapeHtml(f.nom)}</span>
-                                <span class="text-muted">(${f.contenanceCl} cl)</span>
-                                <span class="badge ${f.actif ? 'badge-success' : 'badge-default'}">${f.actif ? 'Actif' : 'Inactif'}</span>
-                            </div>
-                            <div class="settings-item-actions">
-                                <button class="btn btn-sm btn-secondary" onclick="showFormatModal('${f.id}')">Modifier</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteFormat('${f.id}')">Supprimer</button>
-                            </div>
-                        </li>
-                      `).join('')}
+                <ul class="settings-list" id="settings-formats-list">
+                    ${renderSettingsFormats()}
                 </ul>
             </div>
             
@@ -5216,24 +5195,8 @@ const renderParametres = () => {
                         <button class="btn btn-sm btn-primary" onclick="showRecetteModal()">+ Ajouter</button>
                     </div>
                 </div>
-                <ul class="settings-list">
-                    ${recettes.length === 0 ? '<li class="settings-item text-muted">Aucune recette</li>' : 
-                      recettes.map(r => {
-                          const arome = aromes.find(a => a.id === r.aromeId);
-                          return `
-                            <li class="settings-item">
-                                <div class="settings-item-info">
-                                    <span class="color-dot" style="background: ${arome?.couleur || '#ccc'}"></span>
-                                    <span>${escapeHtml(r.nom)}</span>
-                                    <span class="text-muted">(${r.ingredients.length} ingrédient${r.ingredients.length > 1 ? 's' : ''})</span>
-                                </div>
-                                <div class="settings-item-actions">
-                                    <button class="btn btn-sm btn-secondary" onclick="showRecetteModal('${r.id}')">Modifier</button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteRecette('${r.id}')">Supprimer</button>
-                                </div>
-                            </li>
-                          `;
-                      }).join('')}
+                <ul class="settings-list" id="settings-recettes-list">
+                    ${renderSettingsRecettes()}
                 </ul>
             </div>
             
@@ -5248,21 +5211,8 @@ const renderParametres = () => {
                         <button class="btn btn-sm btn-danger" onclick="resetClients()">Effacer tout</button>
                     </div>
                 </div>
-                <ul class="settings-list">
-                    ${clients.length === 0 ? '<li class="settings-item text-muted">Aucun client</li>' :
-                      clients.map(c => `
-                        <li class="settings-item">
-                            <div class="settings-item-info">
-                                <div><strong>${escapeHtml(c.societe || '')}</strong> ${escapeHtml(c.nom || '')}</div>
-                                <div class="text-muted" style="font-size:12px;">${escapeHtml(c.adresse || '')} ${escapeHtml(c.npa || '')}</div>
-                                <span class="badge ${c.actif ? 'badge-success' : 'badge-default'}">${c.actif ? 'Actif' : 'Inactif'}</span>
-                            </div>
-                            <div class="settings-item-actions">
-                                <button class="btn btn-sm btn-secondary" onclick="showClientModal('${c.id}')">Modifier</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteClient('${c.id}')">Supprimer</button>
-                            </div>
-                        </li>
-                      `).join('')}
+                <ul class="settings-list" id="settings-clients-list">
+                    ${renderSettingsClients()}
                 </ul>
             </div>
             
@@ -5307,6 +5257,103 @@ const renderParametres = () => {
     `;
     
     safeRender(html);
+};
+
+// Sub-renderers des cards Parametres : permettent de re-render uniquement la
+// card concernee apres un CRUD, sans reconstruire les 5 cards.
+const renderSettingsEmployes = () => {
+    const employes = DB.get('employees') || [];
+    if (employes.length === 0) return '<li class="settings-item text-muted">Aucun employé</li>';
+    return employes.map(e => `
+        <li class="settings-item">
+            <div class="settings-item-info">
+                <span class="color-dot" style="background: var(--primary)"></span>
+                <span>${escapeHtml(e.prenom)} ${escapeHtml(e.nom)}</span>
+                <span class="badge ${e.actif ? 'badge-success' : 'badge-default'}">${e.actif ? 'Actif' : 'Inactif'}</span>
+            </div>
+            <div class="settings-item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="showEmployeModal('${e.id}')">Modifier</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteEmploye('${e.id}')">Supprimer</button>
+            </div>
+        </li>`).join('');
+};
+
+const renderSettingsAromes = () => {
+    const aromes = DB.get('aromes') || [];
+    if (aromes.length === 0) return '<li class="settings-item text-muted">Aucun arôme</li>';
+    return aromes.map(a => `
+        <li class="settings-item">
+            <div class="settings-item-info">
+                <span class="color-dot" style="background: ${escapeHtml(a.couleur || '#ccc')}"></span>
+                <span>${escapeHtml(a.nom)}</span>
+                <span class="badge ${a.actif ? 'badge-success' : 'badge-default'}">${a.actif ? 'Actif' : 'Inactif'}</span>
+            </div>
+            <div class="settings-item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="showAromeModal('${a.id}')">Modifier</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteArome('${a.id}')">Supprimer</button>
+            </div>
+        </li>`).join('');
+};
+
+const renderSettingsFormats = () => {
+    const formats = DB.get('formats') || [];
+    if (formats.length === 0) return '<li class="settings-item text-muted">Aucun format</li>';
+    return formats.map(f => `
+        <li class="settings-item">
+            <div class="settings-item-info">
+                <span>${escapeHtml(f.nom)}</span>
+                <span class="text-muted">(${f.contenanceCl} cl)</span>
+                <span class="badge ${f.actif ? 'badge-success' : 'badge-default'}">${f.actif ? 'Actif' : 'Inactif'}</span>
+            </div>
+            <div class="settings-item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="showFormatModal('${f.id}')">Modifier</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteFormat('${f.id}')">Supprimer</button>
+            </div>
+        </li>`).join('');
+};
+
+const renderSettingsRecettes = () => {
+    const recettes = DB.get('recettes') || [];
+    const aromesById = indexById(DB.get('aromes') || []);
+    if (recettes.length === 0) return '<li class="settings-item text-muted">Aucune recette</li>';
+    return recettes.map(r => {
+        const arome = aromesById.get(r.aromeId);
+        return `
+        <li class="settings-item">
+            <div class="settings-item-info">
+                <span class="color-dot" style="background: ${escapeHtml(arome?.couleur || '#ccc')}"></span>
+                <span>${escapeHtml(r.nom)}</span>
+                <span class="text-muted">(${r.ingredients.length} ingrédient${r.ingredients.length > 1 ? 's' : ''})</span>
+            </div>
+            <div class="settings-item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="showRecetteModal('${r.id}')">Modifier</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRecette('${r.id}')">Supprimer</button>
+            </div>
+        </li>`;
+    }).join('');
+};
+
+const renderSettingsClients = () => {
+    const clients = DB.get('clients') || [];
+    if (clients.length === 0) return '<li class="settings-item text-muted">Aucun client</li>';
+    return clients.map(c => `
+        <li class="settings-item">
+            <div class="settings-item-info">
+                <div><strong>${escapeHtml(c.societe || '')}</strong> ${escapeHtml(c.nom || '')}</div>
+                <div class="text-muted" style="font-size:12px;">${escapeHtml(c.adresse || '')} ${escapeHtml(c.npa || '')}</div>
+                <span class="badge ${c.actif ? 'badge-success' : 'badge-default'}">${c.actif ? 'Actif' : 'Inactif'}</span>
+            </div>
+            <div class="settings-item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="showClientModal('${c.id}')">Modifier</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteClient('${c.id}')">Supprimer</button>
+            </div>
+        </li>`).join('');
+};
+
+// Patch ciblé d'une card Parametres (evite le re-render complet de la page)
+const updateSettingsCard = (cardName, html) => {
+    const el = document.getElementById('settings-' + cardName + '-list');
+    if (el) el.innerHTML = html;
 };
 
 // Settings - Counters
@@ -5370,7 +5417,7 @@ const saveEmploye = (event, id) => {
     
     modal.hide();
     showToast('Employé enregistré');
-    renderParametres();
+    updateSettingsCard('employes', renderSettingsEmployes());
 };
 
 const deleteEmploye = (id) => {
@@ -5387,7 +5434,7 @@ const deleteEmploye = (id) => {
         const employes = DB.get('employees').filter(e => e.id !== id);
         DB.set('employees', employes);
         showToast('Employé supprimé');
-        renderParametres();
+        updateSettingsCard('employes', renderSettingsEmployes());
     });
 };
 
@@ -5442,7 +5489,7 @@ const saveArome = (event, id) => {
     
     modal.hide();
     showToast('Arôme enregistré');
-    renderParametres();
+    updateSettingsCard('aromes', renderSettingsAromes());
 };
 
 const deleteArome = (id) => {
@@ -5462,7 +5509,7 @@ const deleteArome = (id) => {
         const aromes = DB.get('aromes').filter(a => a.id !== id);
         DB.set('aromes', aromes);
         showToast('Arôme supprimé');
-        renderParametres();
+        updateSettingsCard('aromes', renderSettingsAromes());
     });
 };
 
@@ -5519,7 +5566,7 @@ const saveFormat = (event, id) => {
     
     modal.hide();
     showToast('Format enregistré');
-    renderParametres();
+    updateSettingsCard('formats', renderSettingsFormats());
 };
 
 const deleteFormat = (id) => {
@@ -5536,7 +5583,7 @@ const deleteFormat = (id) => {
         const formats = DB.get('formats').filter(f => f.id !== id);
         DB.set('formats', formats);
         showToast('Format supprimé');
-        renderParametres();
+        updateSettingsCard('formats', renderSettingsFormats());
     });
 };
 
@@ -5686,7 +5733,7 @@ const saveRecette = (event, id) => {
     
     modal.hide();
     showToast('Recette enregistrée');
-    renderParametres();
+    updateSettingsCard('recettes', renderSettingsRecettes());
 };
 
 const deleteRecette = (id) => {
@@ -5695,7 +5742,7 @@ const deleteRecette = (id) => {
         const recettes = DB.get('recettes').filter(r => r.id !== id);
         DB.set('recettes', recettes);
         showToast('Recette supprimée');
-        renderParametres();
+        updateSettingsCard('recettes', renderSettingsRecettes());
     });
 };
 
@@ -5852,7 +5899,7 @@ const saveClient = (event, id) => {
     
     modal.hide();
     showToast('Client enregistré');
-    renderParametres();
+    updateSettingsCard('clients', renderSettingsClients());
 };
 
 const deleteClient = (id) => {
@@ -5869,7 +5916,7 @@ const deleteClient = (id) => {
         const clients = DB.get('clients').filter(c => c.id !== id);
         DB.set('clients', clients);
         showToast('Client supprimé');
-        renderParametres();
+        updateSettingsCard('clients', renderSettingsClients());
     });
 };
 
