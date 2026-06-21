@@ -4,7 +4,7 @@ Application de gestion pour votre entreprise de thé froid.
 
 ## Version
 
-**v8.0**
+**v8.6**
 
 ## Adresse
 
@@ -58,7 +58,7 @@ Application de gestion pour votre entreprise de thé froid.
   - Eau: **ignorée** (pas de déduction)
   - Bouteilles vides: **1 pour 1** selon le format
   - Capsules/Bouchons: **+7.5%** (arrondi supérieur)
-- Si stock inventaire insuffisant: warning affiché, la production continue
+- Si le stock inventaire est insuffisant: production bloquée, aucune déduction ni création de lot
 - Matching intelligent des bouteilles vides (alias 25cl ↔ 0.25l ↔ 250ml)
 
 ### Inventaire
@@ -90,13 +90,14 @@ Application de gestion pour votre entreprise de thé froid.
   - Import/Export Excel
   - Import/Export CSV
 - **Sauvegarde & Restauration**:
-  - Export JSON complet de toutes les données
+  - Export JSON complet de toutes les données, y compris livraisons et historique de production
   - Import depuis un fichier JSON
 
 ### Synchronisation Cloud
 - Synchronisation avec Firebase Firestore
 - Bouton "Sync" pour synchroniser manuellement
-- Sauvegarde automatique des données non-vides
+- Sauvegarde automatique des données, y compris les tables vidées
+- Démarrage en mode local si Firebase est indisponible
 
 ## Structure du projet
 

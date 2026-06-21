@@ -418,7 +418,7 @@ const DB = {
             snapshot.forEach(docSnap => {
                 const key = docSnap.id;
                 const cloudData = docSnap.data().data;
-                if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
+                if (Array.isArray(cloudData)) {
                     localStorage.setItem('thecol_' + key, JSON.stringify(cloudData));
                     hasData = true;
                 }
@@ -435,7 +435,7 @@ const DB = {
     },
     
     init: () => {
-        const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'commandes', 'pointages', 'inventaire', 'livraisons'];
+        const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'history', 'commandes', 'pointages', 'inventaire', 'livraisons'];
         tables.forEach(table => {
             if (!localStorage.getItem('thecol_' + table)) {
                 localStorage.setItem('thecol_' + table, '[]');
@@ -1312,6 +1312,8 @@ const saveLot = (event) => {
     } catch (e) {
         console.error('Error saving lot:', e);
         showToast('Erreur lors de la création du lot', 'error');
+    } finally {
+        if (reenable) reenable();
     }
 };
 
@@ -1345,15 +1347,23 @@ const showVendreModal = (lotId) => {
 };
 
 const vendreLot = (lotId) => {
-    const quantite = parseInt(document.querySelector('#vendreForm input[name="quantite"]').value);
+    const quantite = parseInt(document.querySelector('#vendreForm input[name="quantite"]').value, 10);
     const lots = DB.get('lots');
     const lotIndex = lots.findIndex(l => l.id === lotId);
-    
+
     if (lotIndex === -1) return;
-    
+
     const lot = lots[lotIndex];
+    if (isNaN(quantite) || quantite <= 0) {
+        showToast('Quantité invalide', 'error');
+        return;
+    }
+    if (quantite > (lot.quantite || 0)) {
+        showToast('Quantité supérieure au stock disponible', 'error');
+        return;
+    }
     lot.quantite -= quantite;
-    
+
     if (lot.quantite <= 0) {
         lots.splice(lotIndex, 1);
     }
@@ -1915,14 +1925,17 @@ const saveQuickPointage = (event) => {
     
     if (!employeId || !date || !heureDebut || !heureFin) {
         showToast('Veuillez remplir tous les champs', 'error');
+        if (reenable) reenable();
         return;
     }
     if (parseHHMM(heureDebut) === null || parseHHMM(heureFin) === null) {
         showToast('Format d\'heure invalide (attendu HH:MM)', 'error');
+        if (reenable) reenable();
         return;
     }
     if (parseHHMM(heureFin) <= parseHHMM(heureDebut)) {
         showToast('L\'heure de fin doit être après l\'heure de début', 'error');
+        if (reenable) reenable();
         return;
     }
 
@@ -2113,14 +2126,17 @@ const saveSaisieManuelle = (event) => {
     
     if (!employeId || !date || !heureDebut || !heureFin) {
         showToast('Veuillez remplir tous les champs', 'error');
+        if (reenable) reenable();
         return;
     }
     if (parseHHMM(heureDebut) === null || parseHHMM(heureFin) === null) {
         showToast('Format d\'heure invalide (attendu HH:MM)', 'error');
+        if (reenable) reenable();
         return;
     }
     if (parseHHMM(heureFin) <= parseHHMM(heureDebut)) {
         showToast('L\'heure de fin doit être après l\'heure de début', 'error');
+        if (reenable) reenable();
         return;
     }
 
@@ -2194,6 +2210,8 @@ const savePointage = (event, type) => {
     } catch (e) {
         console.error('Error saving pointage:', e);
         showToast('Erreur lors du pointage', 'error');
+    } finally {
+        if (reenable) reenable();
     }
 };
 
@@ -2771,6 +2789,8 @@ const saveCommande = (event, id) => {
     } catch (e) {
         console.error('Error saving commande:', e);
         showToast('Erreur lors de l\'enregistrement de la commande', 'error');
+    } finally {
+        if (reenable) reenable();
     }
 };
 
@@ -2971,13 +2991,22 @@ const showLivraisonBouteillesModal = (commandeId) => {
         let hasError = false;
 
         inputs.forEach(input => {
+            if (hasError) return;
             const qty = parseInt(input.value, 10) || 0;
             if (qty <= 0) return;
+            const maxQty = parseInt(input.getAttribute('max'), 10) || 0;
+            if (qty > maxQty) {
+                hasError = true;
+                showToast(`Quantité supérieure au stock pour le lot #${String(input.dataset.lot).slice(-6)}`, 'error');
+                return;
+            }
             const lotId = input.dataset.lot;
             const itemKey = input.dataset.item;
             if (!allocations[itemKey]) allocations[itemKey] = [];
             allocations[itemKey].push({ lotId, quantite: qty });
         });
+
+        if (hasError) return;
 
         for (const item of getItems(cmd)) {
             const key = `${item.aromeId}|${item.formatId}`;
@@ -2994,6 +3023,20 @@ const showLivraisonBouteillesModal = (commandeId) => {
         if (hasError) return;
 
         let allLots = DB.get('lots') || [];
+        const lotsById = indexById(allLots);
+        for (const group of Object.values(allocations)) {
+            for (const { lotId, quantite } of group) {
+                const lot = lotsById.get(lotId);
+                if (!lot) {
+                    showToast(`Lot introuvable: #${String(lotId).slice(-6)}`, 'error');
+                    return;
+                }
+                if ((lot.quantite || 0) < quantite) {
+                    showToast(`Stock insuffisant pour le lot #${String(lotId).slice(-6)}`, 'error');
+                    return;
+                }
+            }
+        }
         const lotsUtilises = [];
 
         Object.values(allocations).forEach(group => {
@@ -3002,13 +3045,12 @@ const showLivraisonBouteillesModal = (commandeId) => {
                 const lotIndex = allLots.findIndex(l => l.id === lotId);
                 if (lotIndex === -1) return;
                 const lot = allLots[lotIndex];
-                const taken = Math.min(lot.quantite, quantite);
-                allLots[lotIndex].quantite -= taken;
+                allLots[lotIndex].quantite -= quantite;
                 lotsUtilises.push({
                     lotId: lot.id,
                     arome: lot.arome,
                     format: lot.format,
-                    quantite: taken
+                    quantite
                 });
             });
         });
@@ -3040,10 +3082,10 @@ const showLivraisonBouteillesModal = (commandeId) => {
     const computeTotals = () => {
         document.querySelectorAll('.lot-qty-input').forEach(input => {
             const itemKey = input.dataset.item;
-            const required = parseInt(document.querySelector(`[data-item="${itemKey}"]`)?.closest('.item-total-display')?.dataset?.required || 0, 10);
             const itemInputs = document.querySelectorAll(`.lot-qty-input[data-item="${itemKey}"]`);
             const total = Array.from(itemInputs).reduce((s, inp) => s + (parseInt(inp.value, 10) || 0), 0);
-            const totalEl = document.getElementById(`item-total-${itemKey}`.replace(/\|/g, '_') + '-count');
+            const totalId = `item-total-${itemKey.replace('|', '-')}`.replace(/[^a-zA-Z0-9]/g, '_');
+            const totalEl = document.getElementById(`${totalId}-count`);
             if (totalEl) totalEl.textContent = total;
         });
     };
@@ -4783,7 +4825,17 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
 
         const arome = aromes.find(a => a.nom === aromeNom);
         const recette = recettes.find(r => r.aromeId === arome?.id);
-        const warnings = [];
+        const errors = [];
+        const deductionTotals = new Map();
+        const addDeduction = (item, quantite) => {
+            const key = item.id || normalizeName(item.nom);
+            const current = deductionTotals.get(key);
+            if (current) {
+                current.quantite += quantite;
+            } else {
+                deductionTotals.set(key, { item, quantite });
+            }
+        };
 
         if (recette && Array.isArray(recette.ingredients)) {
             recette.ingredients.forEach(ing => {
@@ -4791,7 +4843,7 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
 
                 const ingQty = parseFloat(ing.quantite);
                 if (Number.isNaN(ingQty)) {
-                    warnings.push(`Quantité de recette invalide pour ${ing.nom}`);
+                    errors.push(`Quantité de recette invalide pour ${ing.nom}`);
                     return;
                 }
                 const baseBesoin = ingQty * litresProduit;
@@ -4799,7 +4851,7 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
                 const item = findInventaireItemByName(inventaire, ing.nom);
 
                 if (!item) {
-                    warnings.push(`Ingrédient absent: ${ing.nom}`);
+                    errors.push(`Ingrédient absent: ${ing.nom}`);
                     return;
                 }
 
@@ -4807,7 +4859,7 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
                 const invUnit = displayUnit(item.unite);
 
                 if (!areUnitsCompatible(ingUnit, invUnit)) {
-                    warnings.push(`Unité incompatible pour ${ing.nom} (recette: ${ingUnit}, inventaire: ${invUnit})`);
+                    errors.push(`Unité incompatible pour ${ing.nom} (recette: ${ingUnit}, inventaire: ${invUnit})`);
                     return;
                 }
 
@@ -4815,31 +4867,24 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
                 if (ingUnit !== invUnit) {
                     const converted = convertQuantity(besoinMajore, ingUnit, invUnit);
                     if (converted === null) {
-                        warnings.push(`Conversion impossible pour ${ing.nom}`);
+                        errors.push(`Conversion impossible pour ${ing.nom}`);
                         return;
                     }
                     besoinInInvUnit = converted;
                 }
 
-                if ((item.quantite || 0) < besoinInInvUnit) {
-                    warnings.push(`Stock insuffisant: ${item.nom}`);
-                }
-
-                item.quantite = Math.round(((item.quantite || 0) - besoinInInvUnit) * 10000) / 10000;
+                addDeduction(item, besoinInInvUnit);
             });
         } else {
-            warnings.push(`Recette introuvable pour ${aromeNom}`);
+            errors.push(`Recette introuvable pour ${aromeNom}`);
         }
 
         producedByFormat.forEach(({ format, quantite }) => {
             const bottleItem = getBottleInventoryItem(inventaire, format);
             if (!bottleItem) {
-                warnings.push(`Bouteilles vides absentes pour ${format.nom}`);
+                errors.push(`Bouteilles vides absentes pour ${format.nom}`);
             } else {
-                if ((bottleItem.quantite || 0) < quantite) {
-                    warnings.push(`Stock insuffisant: ${bottleItem.nom}`);
-                }
-                bottleItem.quantite = (bottleItem.quantite || 0) - quantite;
+                addDeduction(bottleItem, quantite);
             }
         });
 
@@ -4849,13 +4894,26 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
         });
         const capsulesNecessaires = Math.ceil(totalBouteilles * CONSTANTS.CAPSULE_LOSS);
         if (capsulesItem) {
-            if ((capsulesItem.quantite || 0) < capsulesNecessaires) {
-                warnings.push(`Stock insuffisant: ${capsulesItem.nom}`);
-            }
-            capsulesItem.quantite = (capsulesItem.quantite || 0) - capsulesNecessaires;
+            addDeduction(capsulesItem, capsulesNecessaires);
         } else {
-            warnings.push('Capsules/bouchons absents de l\'inventaire');
+            errors.push('Capsules/bouchons absents de l\'inventaire');
         }
+
+        const deductions = Array.from(deductionTotals.values());
+        deductions.forEach(({ item, quantite }) => {
+            if ((item.quantite || 0) < quantite) {
+                errors.push(`Stock insuffisant: ${item.nom}`);
+            }
+        });
+
+        if (errors.length > 0) {
+            showToast(`Production bloquée: ${errors[0]}${errors.length > 1 ? ` (+${errors.length - 1})` : ''}`, 'error');
+            return;
+        }
+
+        deductions.forEach(({ item, quantite }) => {
+            item.quantite = Math.round(((item.quantite || 0) - quantite) * 10000) / 10000;
+        });
 
         const dateProduction = getLocalDateISOString();
         const dates = calculateDates(dateProduction);
@@ -4907,9 +4965,6 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
 
         modal.hide();
         showToast(`Production confirmée: ${totalBouteilles} bouteille(s) ajoutée(s) au stock`);
-        if (warnings.length > 0) {
-            showToast(`Attention: ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1})` : ''}`, 'warning');
-        }
         renderProduction();
     } catch (e) {
         console.error('Error validating production:', e);
@@ -5694,6 +5749,7 @@ const saveRecette = (event, id) => {
     
     if (invalidUnits.length > 0) {
         showToast(`Unité invalide: ${invalidUnits.join(', ')}`, 'error');
+        if (reenable) reenable();
         return;
     }
 
@@ -6054,7 +6110,7 @@ const resetClients = () => {
 
 // Export all data to JSON
 const exportAllData = () => {
-    const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'commandes', 'pointages', 'inventaire'];
+    const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'history', 'commandes', 'pointages', 'inventaire', 'livraisons'];
     const data = {};
     tables.forEach(table => {
         data[table] = DB.get(table) || [];
@@ -6079,7 +6135,7 @@ const importAllData = (event) => {
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target.result);
-            const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'commandes', 'pointages', 'inventaire'];
+            const tables = ['employees', 'aromes', 'formats', 'recettes', 'clients', 'lots', 'history', 'commandes', 'pointages', 'inventaire', 'livraisons'];
             let count = 0;
             tables.forEach(table => {
                 if (data[table] && Array.isArray(data[table])) {
@@ -6100,16 +6156,18 @@ const importAllData = (event) => {
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     DB.init();
-    // Wait for Firebase to be ready, then sync
-    const waitForFirebase = () => new Promise(resolve => {
+    const waitForFirebase = (timeoutMs = 3000) => new Promise(resolve => {
+        const startedAt = Date.now();
         const check = () => {
-            if (window.firebaseReady) return resolve();
+            if (window.firebaseReady === true) return resolve(true);
+            if (window.firebaseReady === false) return resolve(false);
+            if (Date.now() - startedAt >= timeoutMs) return resolve(false);
             setTimeout(check, 100);
         };
         check();
     });
-    await waitForFirebase();
-    await DB.loadFromFirebase(false);
+    const firebaseAvailable = await waitForFirebase();
+    if (firebaseAvailable) await DB.loadFromFirebase(false);
     // Migration silencieuse (post-sync Firebase) : normalise les valeurs legacy de client.tarifs
     migrateClientTarifs();
     router();
