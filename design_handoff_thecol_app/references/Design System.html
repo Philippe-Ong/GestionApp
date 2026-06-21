@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThéCol — Design System v1.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html { font-family:'Outfit',sans-serif; scroll-behavior:smooth; }
+body { background:#F5F5F0; color:#2A2A2A; }
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#C8C3B8; border-radius:3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ─── Design Tokens ──────────────────────────────────────────────────────── */
+const COLOR_GROUPS = [
+  {
+    label: 'Brand',
+    tokens: [
+      { name:'Primary',       token:'colorPrimary',      hex:'#5D7B3E', usage:'CTA, accents, onglet actif' },
+      { name:'Primary Dark',  token:'colorPrimaryDark',  hex:'#2C4A2E', usage:'Header sombre, gradient end' },
+      { name:'Primary Light', token:'colorPrimaryLight', hex:'#8BA66B', usage:'Accent secondaire' },
+    ]
+  },
+  {
+    label: 'Surfaces',
+    tokens: [
+      { name:'Background', token:'colorBackground', hex:'#F5F5F0', usage:'Fond général de l\'app' },
+      { name:'Surface',    token:'colorSurface',    hex:'#FFFFFF',  usage:'Cards, headers, inputs' },
+    ]
+  },
+  {
+    label: 'Texte',
+    tokens: [
+      { name:'Text Primary',   token:'colorTextPrimary',   hex:'#2A2A2A', usage:'Corps, titres' },
+      { name:'Text Secondary', token:'colorTextSecondary', hex:'#777777', usage:'Labels, sous-titres' },
+      { name:'Text Tertiary',  token:'colorTextTertiary',  hex:'#AAAAAA', usage:'Placeholders, hints' },
+    ]
+  },
+  {
+    label: 'Bordures',
+    tokens: [
+      { name:'Border',       token:'colorBorder',      hex:'#E0DDD5', usage:'Contours cards, inputs' },
+      { name:'Border Light', token:'colorBorderLight', hex:'#EEEAE2', usage:'Séparateurs discrets' },
+    ]
+  },
+  {
+    label: 'Statuts',
+    tokens: [
+      { name:'Success BG', token:'colorSuccessBg', hex:'#B8D4A0', usage:'Fond badge "livrée"' },
+      { name:'Success',    token:'colorSuccess',   hex:'#7BB865', usage:'Indicateur succès, dot live' },
+      { name:'Warning BG', token:'colorWarningBg', hex:'#F0D9A0', usage:'Fond badge "en attente"' },
+      { name:'Warning',    token:'colorWarning',   hex:'#C8960A', usage:'Texte warning, urgence' },
+      { name:'Error BG',   token:'colorErrorBg',   hex:'#E8B4AF', usage:'Fond badge "en retard"' },
+      { name:'Error',      token:'colorError',     hex:'#C0392B', usage:'Bouton danger, erreurs' },
+      { name:'Info BG',    token:'colorInfoBg',    hex:'#A8C8E8', usage:'Fond badge "produite"' },
+      { name:'Info',       token:'colorInfo',      hex:'#2E72B8', usage:'Indicateur info' },
+    ]
+  },
+];
+
+const TYPE_SCALE = [
+  { name:'Display',         size:38, weight:700, lh:1.0, usage:'Horloge pointage' },
+  { name:'H1',              size:28, weight:700, lh:1.1, usage:'Titre écran, montant principal' },
+  { name:'H2',              size:26, weight:700, lh:1.1, usage:'Stats dashboard (26sp)' },
+  { name:'H3',              size:22, weight:700, lh:1.2, usage:'KPI secondaire' },
+  { name:'Title Large',     size:16, weight:600, lh:1.3, usage:'Header titre normal' },
+  { name:'Body Large Bold', size:15, weight:600, lh:1.3, usage:'Noms clients en liste' },
+  { name:'Body',            size:13, weight:400, lh:1.35,usage:'Corps de liste, description' },
+  { name:'Body SemiBold',   size:13, weight:600, lh:1.35,usage:'Boutons, montants, actions' },
+  { name:'Caption',         size:12, weight:400, lh:1.4, usage:'Sous-titres, métadonnées' },
+  { name:'Section Label',   size:11, weight:600, lh:1.3, usage:'Titres section (uppercase)' },
+  { name:'Micro',           size:10, weight:500, lh:1.3, usage:'Pills, onglets, timestamps' },
+  { name:'Nano',            size:9,  weight:400, lh:1.3, usage:'Petits indicateurs' },
+];
+
+const RADII = [
+  { name:'radius_xs',     dp:6,   usage:'Petites cellules' },
+  { name:'radius_sm',     dp:8,   usage:'Boutons small' },
+  { name:'radius_md',     dp:10,  usage:'Inputs, boutons standard' },
+  { name:'radius_card',   dp:12,  usage:'Cards' },
+  { name:'radius_card_lg',dp:16,  usage:'Hero cards' },
+  { name:'radius_pill',   dp:20,  usage:'Badges, pills' },
+];
+
+const SPACING = [4,6,8,10,12,14,16,18,20,22,24,32,48];
+
+const COMPONENTS = [
+  {
+    id:'btn', label:'Boutons',
+    specs:[
+      ['Hauteur sm', '28dp'],['Hauteur md', '36dp'],['Hauteur lg', '40–42dp'],
+      ['Padding horizontal', '16dp'],['Border radius', '10dp (radius_md)'],
+      ['Typographie', 'Body SemiBold — 13sp w600'],
+      ['Ripple Android', '?attr/selectableItemBackground (borné)'],
+      ['État pressed', 'ripple Material + alpha 0.65'],
+    ]
+  },
+  {
+    id:'badge', label:'Badges de statut',
+    specs:[
+      ['Border radius', '20dp (radius_pill)'],['Padding', '2dp 9dp'],
+      ['Typographie', 'Micro — 10sp w500'],
+      ['Fond', 'couleur statut correspondante'],
+    ]
+  },
+  {
+    id:'card', label:'Cards',
+    specs:[
+      ['Background', 'colorSurface (#FFF)'],['Border radius', '12dp (radius_card)'],
+      ['Élévation', '1dp'],['Padding interne', '12–14dp'],
+      ['Accentuation left-border', '4dp solid, couleur statut'],
+      ['Composant Android', 'MaterialCardView'],
+    ]
+  },
+  {
+    id:'input', label:'Champs de saisie',
+    specs:[
+      ['Hauteur', '40dp'],['Padding horizontal', '12dp'],
+      ['Border repos', '1.5dp colorBorder (#E0DDD5)'],
+      ['Border focus', '1.5dp colorPrimary (#5D7B3E)'],
+      ['Border radius', '10dp (radius_md)'],
+      ['Label', 'Section Label 11sp w600 UPPERCASE'],
+      ['Composant Android', 'TextInputLayout (Material 3)'],
+    ]
+  },
+  {
+    id:'header', label:'AppBar / Header',
+    specs:[
+      ['Background', 'colorSurface'],['Élévation', '0 + divider bottom 1dp'],
+      ['Titre "big"', 'H1 — 26sp w700, padding 8/14dp'],
+      ['Titre normal', 'Title Large — 16sp w600, padding 11dp'],
+      ['Bouton retour', 'colorPrimary 14sp — "‹ Retour"'],
+      ['Composant Android', 'MaterialToolbar + AppBarLayout elevation=0'],
+    ]
+  },
+  {
+    id:'tabbar', label:'Barre de navigation',
+    specs:[
+      ['Composant Android', 'BottomNavigationView (NavigationBar M3)'],
+      ['Hauteur', '56dp + window insets bottom'],
+      ['Background', 'colorSurface, élévation 8dp'],
+      ['Icône active', 'colorPrimary, opacity 1.0'],
+      ['Icône inactive', 'colorTextPrimary, opacity 0.38'],
+      ['Label actif', 'Micro SemiBold 10sp, colorPrimary'],
+      ['Badge numérique', 'Fond #E04040, texte blanc, 9sp, border 1.5dp blanc'],
+      ['5 onglets', 'Accueil · Commandes · Pointage · Stock · Plus'],
+    ]
+  },
+];
+
+/* ─── XML snippets ───────────────────────────────────────────────────────── */
+const XML_COLORS = `<!-- res/values/colors.xml -->
+<resources>
+
+    <!-- ── Brand ── -->
+    <color name="colorPrimary">#5D7B3E</color>
+    <color name="colorPrimaryDark">#2C4A2E</color>
+    <color name="colorPrimaryLight">#8BA66B</color>
+
+    <!-- ── Surfaces ── -->
+    <color name="colorBackground">#F5F5F0</color>
+    <color name="colorSurface">#FFFFFF</color>
+
+    <!-- ── Texte ── -->
+    <color name="colorTextPrimary">#2A2A2A</color>
+    <color name="colorTextSecondary">#777777</color>
+    <color name="colorTextTertiary">#AAAAAA</color>
+
+    <!-- ── Bordures ── -->
+    <color name="colorBorder">#E0DDD5</color>
+    <color name="colorBorderLight">#EEEAE2</color>
+
+    <!-- ── Statuts ── -->
+    <color name="colorSuccessBg">#B8D4A0</color>
+    <color name="colorSuccess">#7BB865</color>
+    <color name="colorWarningBg">#F0D9A0</color>
+    <color name="colorWarning">#C8960A</color>
+    <color name="colorErrorBg">#E8B4AF</color>
+    <color name="colorError">#C0392B</color>
+    <color name="colorInfoBg">#A8C8E8</color>
+    <color name="colorInfo">#2E72B8</color>
+
+    <!-- ── Utilitaires ── -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="transparent">#00000000</color>
+
+</resources>`;
+
+const XML_DIMENS = `<!-- res/values/dimens.xml -->
+<resources>
+
+    <!-- ── Espacement ── -->
+    <dimen name="spacing_1">4dp</dimen>
+    <dimen name="spacing_2">8dp</dimen>
+    <dimen name="spacing_3">12dp</dimen>
+    <dimen name="spacing_4">16dp</dimen>
+    <dimen name="spacing_5">20dp</dimen>
+    <dimen name="spacing_6">24dp</dimen>
+    <dimen name="spacing_8">32dp</dimen>
+    <dimen name="spacing_12">48dp</dimen>
+
+    <!-- ── Border Radius ── -->
+    <dimen name="radius_xs">6dp</dimen>
+    <dimen name="radius_sm">8dp</dimen>
+    <dimen name="radius_md">10dp</dimen>
+    <dimen name="radius_card">12dp</dimen>
+    <dimen name="radius_card_lg">16dp</dimen>
+    <dimen name="radius_pill">20dp</dimen>
+
+    <!-- ── Composants ── -->
+    <dimen name="btn_height_sm">28dp</dimen>
+    <dimen name="btn_height_md">36dp</dimen>
+    <dimen name="btn_height_lg">42dp</dimen>
+    <dimen name="input_height">40dp</dimen>
+    <dimen name="tab_bar_height">56dp</dimen>
+    <dimen name="app_bar_height">44dp</dimen>
+    <dimen name="card_padding">14dp</dimen>
+    <dimen name="screen_padding_h">16dp</dimen>
+
+    <!-- ── Typographie ── -->
+    <dimen name="text_nano">9sp</dimen>
+    <dimen name="text_micro">10sp</dimen>
+    <dimen name="text_label">11sp</dimen>
+    <dimen name="text_caption">12sp</dimen>
+    <dimen name="text_body">13sp</dimen>
+    <dimen name="text_body_lg">14sp</dimen>
+    <dimen name="text_title">15sp</dimen>
+    <dimen name="text_title_lg">16sp</dimen>
+    <dimen name="text_h3">22sp</dimen>
+    <dimen name="text_h2">26sp</dimen>
+    <dimen name="text_h1">28sp</dimen>
+    <dimen name="text_display">38sp</dimen>
+
+</resources>`;
+
+const XML_THEMES = `<!-- res/values/themes.xml -->
+<resources>
+
+    <style name="Theme.TheCol" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/colorPrimaryLight</item>
+        <item name="colorSecondary">@color/colorPrimaryDark</item>
+        <item name="android:colorBackground">@color/colorBackground</item>
+        <item name="colorSurface">@color/colorSurface</item>
+        <item name="colorError">@color/colorError</item>
+        <item name="android:fontFamily">@font/outfit_regular</item>
+    </style>
+
+    <!-- ── Card ── -->
+    <style name="Widget.TheCol.Card" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">@dimen/radius_card</item>
+        <item name="cardElevation">1dp</item>
+        <item name="cardBackgroundColor">@color/colorSurface</item>
+        <item name="rippleColor">@color/colorPrimary</item>
+    </style>
+
+    <!-- ── Bouton Primary ── -->
+    <style name="Widget.TheCol.Button.Primary" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/colorPrimary</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">@dimen/btn_height_md</item>
+        <item name="cornerRadius">@dimen/radius_md</item>
+        <item name="android:paddingStart">@dimen/spacing_4</item>
+        <item name="android:paddingEnd">@dimen/spacing_4</item>
+    </style>
+
+    <!-- ── Bouton Secondary ── -->
+    <style name="Widget.TheCol.Button.Secondary" parent="Widget.Material3.Button.TonalButton">
+        <item name="backgroundTint">#EDEAE3</item>
+        <item name="android:textColor">@color/colorTextPrimary</item>
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="cornerRadius">@dimen/radius_md</item>
+    </style>
+
+    <!-- ── Bouton Danger ── -->
+    <style name="Widget.TheCol.Button.Danger" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/colorError</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="cornerRadius">@dimen/radius_md</item>
+    </style>
+
+    <!-- ── Input ── -->
+    <style name="Widget.TheCol.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxCornerRadiusTopStart">@dimen/radius_md</item>
+        <item name="boxCornerRadiusTopEnd">@dimen/radius_md</item>
+        <item name="boxCornerRadiusBottomStart">@dimen/radius_md</item>
+        <item name="boxCornerRadiusBottomEnd">@dimen/radius_md</item>
+        <item name="boxStrokeColor">@color/colorBorder</item>
+        <item name="boxStrokeWidth">1.5dp</item>
+        <item name="hintTextColor">@color/colorTextSecondary</item>
+    </style>
+
+    <!-- ── TextAppearance ── -->
+    <style name="TextAppearance.TheCol.Display">
+        <item name="android:textSize">@dimen/text_display</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:fontFamily">@font/outfit_bold</item>
+        <item name="android:letterSpacing">0.05</item>
+    </style>
+    <style name="TextAppearance.TheCol.H1">
+        <item name="android:textSize">@dimen/text_h1</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:fontFamily">@font/outfit_bold</item>
+    </style>
+    <style name="TextAppearance.TheCol.Body">
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="android:textColor">@color/colorTextPrimary</item>
+    </style>
+    <style name="TextAppearance.TheCol.Caption">
+        <item name="android:textSize">@dimen/text_label</item>
+        <item name="android:textColor">@color/colorTextSecondary</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+</resources>`;
+
+const SPEC_INTERACTIONS = [
+  {
+    title: 'Transitions entre écrans',
+    icon: '→',
+    color: '#5D7B3E',
+    items: [
+      { label:'Navigation vers',    value:'slide-in depuis la droite — translateX(100%→0)' },
+      { label:'Retour',             value:'slide-out vers la droite — translateX(0→100%)' },
+      { label:'Changement d\'onglet',value:'cross-fade ou slide selon direction' },
+      { label:'Durée',              value:'280ms' },
+      { label:'Easing',             value:'cubic-bezier(0.32, 0, 0.18, 1)' },
+      { label:'Android (Fragment)', value:'FragmentTransaction.setCustomAnimations()' },
+      { label:'Android (Activity)', value:'ActivityOptions.makeCustomAnimation()' },
+      { label:'Android (Compose)',  value:'AnimatedNavHost + slideIntoContainer' },
+    ]
+  },
+  {
+    title: 'Feedback tactile',
+    icon: '👆',
+    color: '#2E72B8',
+    items: [
+      { label:'Ripple standard',   value:'?attr/selectableItemBackground (non borné)' },
+      { label:'Ripple borné',      value:'?attr/selectableItemBackgroundBorderless' },
+      { label:'Cards / rows',      value:'foreground ripple centré sur le MaterialCardView' },
+      { label:'Opacité pressed',   value:'alpha 0.65 (override si pas de ripple)' },
+      { label:'Feedback haptique', value:'HapticFeedbackConstants.VIRTUAL_KEY sur actions clés' },
+    ]
+  },
+  {
+    title: 'Toast / Snackbar',
+    icon: '💬',
+    color: '#C8960A',
+    items: [
+      { label:'Composant Android',  value:'Snackbar (Material 3)' },
+      { label:'Position',          value:'bottom — 16dp au-dessus de la NavBar' },
+      { label:'Fond',              value:'#1E1E1E à 88% opacité' },
+      { label:'Texte',             value:'blanc, 13sp' },
+      { label:'Border radius',     value:'20dp' },
+      { label:'Durée visible',     value:'~1 800ms' },
+      { label:'Anim. entrée',      value:'fade-in 200ms' },
+      { label:'Anim. sortie',      value:'fade-out 300ms' },
+    ]
+  },
+  {
+    title: 'Listes & scroll',
+    icon: '↕',
+    color: '#7BB865',
+    items: [
+      { label:'Scrollbar',       value:'invisible (android:scrollbars="none")' },
+      { label:'Over-scroll',     value:'désactivé (android:overScrollMode="never")' },
+      { label:'Swipe-to-action', value:'ItemTouchHelper sur RecyclerView (à définir)' },
+      { label:'Pull-to-refresh', value:'SwipeRefreshLayout, couleur colorPrimary' },
+    ]
+  },
+];
+
+/* ─── UI Atoms ───────────────────────────────────────────────────────────── */
+const isLight = (hex) => {
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return (r*299+g*587+b*114)/1000 > 155;
+};
+
+const Swatch = ({name, token, hex, usage}) => {
+  const [copied, setCopied] = useState(false);
+  const doCopy = () => { try{navigator.clipboard.writeText(hex);}catch(e){} setCopied(true); setTimeout(()=>setCopied(false),1400); };
+  const light = isLight(hex);
+  return (
+    <div onClick={doCopy} style={{borderRadius:10, overflow:'hidden', border:'1px solid #E8E5DD', cursor:'pointer', transition:'transform 0.12s', userSelect:'none'}}
+      onMouseEnter={e=>e.currentTarget.style.transform='translateY(-2px)'}
+      onMouseLeave={e=>e.currentTarget.style.transform='none'}>
+      <div style={{height:60, background:hex, display:'flex', alignItems:'flex-end', padding:'6px 8px'}}>
+        <span style={{fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:light?'rgba(0,0,0,0.45)':'rgba(255,255,255,0.75)', fontWeight:500}}>
+          {copied ? '✓ copié' : hex}
+        </span>
+      </div>
+      <div style={{padding:'9px 10px', background:'#fff'}}>
+        <div style={{fontSize:12, fontWeight:600, marginBottom:2, color:'#2A2A2A'}}>{name}</div>
+        <div style={{fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:'#5D7B3E', marginBottom:5}}>{token}</div>
+        <div style={{fontSize:10, color:'#999', lineHeight:1.35}}>{usage}</div>
+      </div>
+    </div>
+  );
+};
+
+const Tag = ({children, mono=false, green=false, style={}}) => (
+  <span style={{display:'inline-flex', alignItems:'center', padding:'2px 8px', borderRadius:6, fontSize:11, fontWeight:500,
+    fontFamily: mono?"'JetBrains Mono',monospace":'inherit',
+    background:green?'#E8F2E0':'#EDEAE3', color:green?'#3D6A25':'#555', whiteSpace:'nowrap', ...style}}>
+    {children}
+  </span>
+);
+
+const CodeBlock = ({code, label}) => {
+  const [copied, setCopied] = useState(false);
+  const doCopy = () => { try{navigator.clipboard.writeText(code);}catch(e){} setCopied(true); setTimeout(()=>setCopied(false),1800); };
+  return (
+    <div style={{borderRadius:10, overflow:'hidden', marginTop:12}}>
+      <div style={{padding:'7px 16px', background:'#1A2818', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #2C4020'}}>
+        <span style={{fontSize:11, color:'#7BB865', fontFamily:"'JetBrains Mono',monospace", fontWeight:500}}>{label}</span>
+        <button onClick={doCopy} style={{background:'none', border:'none', cursor:'pointer', fontSize:11, color:copied?'#7BB865':'#5A7A50', fontFamily:"'JetBrains Mono',monospace", padding:0}}>
+          {copied ? '✓ copié' : 'copier'}
+        </button>
+      </div>
+      <pre style={{background:'#1A2818', color:'#B8D4A0', padding:'18px 20px', fontSize:12, fontFamily:"'JetBrains Mono',monospace", overflowX:'auto', lineHeight:1.65, margin:0}}>{code}</pre>
+    </div>
+  );
+};
+
+const SpecRow = ({label, value}) => (
+  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderBottom:'1px solid #F0EDE6', gap:12}}>
+    <span style={{fontSize:12, color:'#666', flexShrink:0}}>{label}</span>
+    <Tag mono style={{textAlign:'right', maxWidth:'60%', overflow:'hidden', textOverflow:'ellipsis'}}>{value}</Tag>
+  </div>
+);
+
+const SectionHdr = ({id, title, sub}) => (
+  <div id={id} style={{marginBottom:28, scrollMarginTop:24}}>
+    <h2 style={{fontSize:24, fontWeight:700, color:'#2A2A2A', marginBottom:6}}>{title}</h2>
+    {sub && <p style={{fontSize:13, color:'#888', lineHeight:1.5}}>{sub}</p>}
+    <div style={{height:2, background:'linear-gradient(90deg, #5D7B3E 0%, transparent 70%)', marginTop:12, borderRadius:1}}/>
+  </div>
+);
+
+/* ─── Component Demos ───────────────────────────────────────────────────── */
+const DemoBg = ({children}) => (
+  <div style={{background:'#F5F5F0', borderRadius:12, padding:20, display:'flex', flexWrap:'wrap', gap:10, alignItems:'center', border:'1px solid #EEEAE2'}}>
+    {children}
+  </div>
+);
+
+const Btn = ({children, variant='primary', size='md', style={}}) => {
+  const h = size==='sm'?28:size==='lg'?42:36;
+  const bg = variant==='primary'?'#5D7B3E':variant==='danger'?'#C0392B':variant==='ghost'?'transparent':'#EDEAE3';
+  const c  = variant==='primary'||variant==='danger'?'#fff':'#2A2A2A';
+  const border = variant==='ghost'?'1.5px solid #E0DDD5':'none';
+  return (
+    <div style={{height:h, padding:'0 16px', borderRadius:10, background:bg, color:c, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:size==='sm'?12:13, fontWeight:600, border, cursor:'pointer', userSelect:'none', ...style}}>
+      {children}
+    </div>
+  );
+};
+
+const ButtonDemo = () => (
+  <DemoBg>
+    <Btn variant="primary">Créer</Btn>
+    <Btn variant="secondary">Secondaire</Btn>
+    <Btn variant="danger">Annuler</Btn>
+    <Btn variant="ghost">Ghost</Btn>
+    <Btn variant="primary" size="sm">Petit</Btn>
+    <Btn variant="primary" size="lg">Grand</Btn>
+  </DemoBg>
+);
+
+const BadgeDemo = () => (
+  <DemoBg>
+    {[['en attente','#F0D9A0'],['produite','#A8C8E8'],['livrée','#B8D4A0'],['en retard','#E8B4AF'],['payée','#B8D4A0'],['ok','#B8D4A0'],['bientôt','#F0D9A0'],['expiré','#E8B4AF']].map(([l,bg])=>(
+      <span key={l} style={{background:bg, color:'#2A2A2A', borderRadius:20, padding:'3px 10px', fontSize:10, fontWeight:500, whiteSpace:'nowrap'}}>{l}</span>
+    ))}
+  </DemoBg>
+);
+
+const CardDemo = () => (
+  <div style={{background:'#F5F5F0', borderRadius:12, padding:20, display:'flex', flexDirection:'column', gap:10, border:'1px solid #EEEAE2'}}>
+    {/* Card standard */}
+    <div style={{background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.05)', padding:'13px'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4}}>
+        <div>
+          <span style={{fontSize:10, color:'#AAA'}}>#042</span>
+          <div style={{fontSize:15, fontWeight:600, marginTop:2}}>Café du Nord</div>
+        </div>
+        <span style={{background:'#F0D9A0', color:'#2A2A2A', borderRadius:20, padding:'2px 9px', fontSize:10, fontWeight:500}}>en attente</span>
+      </div>
+      <div style={{fontSize:11, color:'#777', marginBottom:10}}>Citron 50cl ×60</div>
+      <div style={{display:'flex', justifyContent:'space-between', paddingTop:9, borderTop:'1px solid #EEEAE2'}}>
+        <span style={{fontSize:11, color:'#777'}}>livraison 08.05</span>
+        <span style={{fontSize:13, fontWeight:700, color:'#5D7B3E'}}>CHF 480.–</span>
+      </div>
+    </div>
+    {/* Card accent border */}
+    <div style={{background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.05)', padding:'12px 14px', borderLeft:'4px solid #F0D9A0'}}>
+      <div style={{display:'flex', alignItems:'center', gap:10}}>
+        <span style={{fontSize:16}}>⚠</span>
+        <div>
+          <div style={{fontSize:12, fontWeight:600}}>Capsules 25cl — stock bas</div>
+          <div style={{fontSize:10, color:'#777'}}>12 restantes (seuil: 50)</div>
+        </div>
+      </div>
+    </div>
+    {/* Card dark */}
+    <div style={{background:'#2C4A2E', borderRadius:12, padding:'16px'}}>
+      <span style={{fontSize:11, color:'rgba(255,255,255,0.6)', display:'block'}}>POINTAGE</span>
+      <div style={{fontSize:38, fontWeight:700, color:'#fff', lineHeight:1, marginTop:4, letterSpacing:1}}>14:32</div>
+      <div style={{marginTop:12, background:'rgba(255,255,255,0.93)', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10}}>
+        <span>⏱</span>
+        <span style={{fontSize:13, fontWeight:600, flex:1}}>Pointer mon arrivée</span>
+        <span style={{fontSize:16, color:'#5D7B3E'}}>›</span>
+      </div>
+    </div>
+  </div>
+);
+
+const InputDemo = () => (
+  <div style={{background:'#F5F5F0', borderRadius:12, padding:20, display:'flex', flexDirection:'column', gap:12, border:'1px solid #EEEAE2'}}>
+    <div>
+      <div style={{fontSize:10, color:'#777', textTransform:'uppercase', letterSpacing:0.5, fontWeight:600, marginBottom:5}}>Client</div>
+      <div style={{height:40, border:'1.5px solid #E0DDD5', borderRadius:10, background:'#fff', padding:'0 12px', display:'flex', alignItems:'center'}}>
+        <span style={{fontSize:13, color:'#AAAAAA'}}>Choisir un client…</span>
+      </div>
+    </div>
+    <div>
+      <div style={{fontSize:10, color:'#777', textTransform:'uppercase', letterSpacing:0.5, fontWeight:600, marginBottom:5}}>Date de livraison</div>
+      <div style={{height:40, border:'1.5px solid #5D7B3E', borderRadius:10, background:'#fff', padding:'0 12px', display:'flex', alignItems:'center'}}>
+        <span style={{fontSize:13, color:'#2A2A2A'}}>08.05.2026</span>
+      </div>
+      <div style={{fontSize:10, color:'#AAAAAA', marginTop:4}}>Format jj.mm.aaaa</div>
+    </div>
+    <div>
+      <div style={{fontSize:10, color:'#777', textTransform:'uppercase', letterSpacing:0.5, fontWeight:600, marginBottom:5}}>Note interne</div>
+      <div style={{height:40, border:'1.5px solid #E0DDD5', borderRadius:10, background:'#EDEAE3', padding:'0 12px', display:'flex', alignItems:'center'}}>
+        <span style={{fontSize:13, color:'#AAAAAA'}}>Désactivé</span>
+      </div>
+    </div>
+  </div>
+);
+
+const HeaderDemo = () => (
+  <div style={{background:'#F5F5F0', borderRadius:12, overflow:'hidden', border:'1px solid #EEEAE2', display:'flex', flexDirection:'column', gap:4, padding:12}}>
+    <div style={{background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', padding:'8px 16px 14px', display:'flex', alignItems:'center'}}>
+      <div style={{flex:1}}>
+        <div style={{fontSize:26, fontWeight:700, color:'#2A2A2A', lineHeight:1}}>Commandes</div>
+      </div>
+      <Btn variant="primary" size="sm">+ Créer</Btn>
+    </div>
+    <div style={{background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', padding:'11px 16px', display:'flex', alignItems:'center', gap:10}}>
+      <span style={{color:'#5D7B3E', fontSize:14, fontWeight:500}}>‹ Retour</span>
+      <div style={{flex:1}}><span style={{fontSize:16, fontWeight:600}}>#042 Café du Nord</span></div>
+      <span style={{fontSize:14, color:'#AAAAAA'}}>⋯</span>
+    </div>
+  </div>
+);
+
+const TabBarDemo = () => {
+  const [active, setActive] = useState('commandes');
+  const tabs = [
+    {k:'dashboard', ic:'⊞', l:'Accueil'},
+    {k:'commandes', ic:'◧', l:'Commandes', badge:3},
+    {k:'pointage',  ic:'◷', l:'Pointage'},
+    {k:'stock',     ic:'◫', l:'Stock'},
+    {k:'plus',      ic:'☰', l:'Plus'},
+  ];
+  return (
+    <div style={{background:'#F5F5F0', borderRadius:12, padding:'12px 12px 0', border:'1px solid #EEEAE2', overflow:'hidden'}}>
+      <div style={{background:'rgba(255,255,255,0.97)', borderTop:'1px solid #E0DDD5', display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'6px 0 20px', borderRadius:'0 0 10px 10px'}}>
+        {tabs.map(t=>(
+          <div key={t.k} onClick={()=>setActive(t.k)} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:3, padding:'4px 0', cursor:'pointer', position:'relative'}}>
+            <div style={{position:'relative'}}>
+              <span style={{fontSize:22, opacity:t.k===active?1:0.38, color:t.k===active?'#5D7B3E':'#2A2A2A'}}>{t.ic}</span>
+              {t.badge&&t.k!==active&&<div style={{position:'absolute', top:-2, right:-7, background:'#E04040', color:'#fff', borderRadius:8, fontSize:9, fontWeight:700, padding:'1px 4px', minWidth:14, textAlign:'center', border:'1.5px solid #fff'}}>{t.badge}</div>}
+            </div>
+            <span style={{fontSize:10, color:t.k===active?'#5D7B3E':'#777', fontWeight:t.k===active?600:400}}>{t.l}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const StepTrackerDemo = () => {
+  const steps = ['Créée','Planif.','Produite','BL','Livrée'];
+  return (
+    <div style={{background:'#F5F5F0', borderRadius:12, padding:20, border:'1px solid #EEEAE2'}}>
+      <div style={{background:'#fff', borderRadius:10, padding:'16px', display:'flex', alignItems:'center'}}>
+        {steps.map((s,i,arr)=>(
+          <React.Fragment key={s}>
+            <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:4}}>
+              <div style={{width:24, height:24, borderRadius:12, background:i<2?'#7BB865':i===2?'#F0D9A0':'#EDEAE3', border:i===2?'2px solid #5D7B3E':'none', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+                <span style={{fontSize:10, fontWeight:700, color:i<2?'#fff':'#666'}}>{i<2?'✓':i+1}</span>
+              </div>
+              <span style={{fontSize:9, fontWeight:i===2?600:400, color:i===2?'#5D7B3E':'#AAA', whiteSpace:'nowrap'}}>{s}</span>
+            </div>
+            {i<arr.length-1&&<div style={{flex:1, height:2, background:i<2?'#7BB865':'#EDEAE3', marginBottom:14}}/>}
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{marginTop:8, fontSize:11, color:'#888', textAlign:'center'}}>Tracker progression commande — 5 étapes</div>
+    </div>
+  );
+};
+
+const AvatarDemo = () => (
+  <DemoBg>
+    {[
+      {initials:'PO', size:46, bg:'#B8D4A0', live:false},
+      {initials:'MD', size:36, bg:'#B8D4A0', live:false},
+      {initials:'TL', size:36, bg:'#B8D4A0', live:true},
+      {initials:'PM', size:30, bg:'#EDEAE3', live:false},
+    ].map(({initials,size,bg,live},i)=>(
+      <div key={i} style={{position:'relative', display:'inline-flex'}}>
+        <div style={{width:size, height:size, borderRadius:size/2, background:bg, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <span style={{fontSize:size*0.3, fontWeight:700}}>{initials}</span>
+        </div>
+        {live&&<div style={{position:'absolute', top:0, right:0, width:size*0.26, height:size*0.26, borderRadius:size*0.13, background:'#3CA350', border:'2px solid #fff'}}/>}
+      </div>
+    ))}
+  </DemoBg>
+);
+
+/* ─── Sidebar nav ────────────────────────────────────────────────────────── */
+const NAV = [
+  {id:'marque',        label:'Marque & Logo'},
+  {id:'couleurs',      label:'Couleurs'},
+  {id:'typographie',   label:'Typographie'},
+  {id:'espacements',   label:'Espacements'},
+  {id:'composants',    label:'Composants'},
+  {id:'interactions',  label:'Interactions'},
+  {id:'android-xml',   label:'Android XML'},
+];
+
+/* ─── Main App ───────────────────────────────────────────────────────────── */
+const App = () => {
+  const [activeNav, setActiveNav] = useState('marque');
+
+  useEffect(() => {
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if(e.isIntersecting) setActiveNav(e.target.id); });
+    }, { rootMargin:'-20% 0px -70% 0px' });
+    NAV.forEach(n => { const el = document.getElementById(n.id); if(el) obs.observe(el); });
+    return () => obs.disconnect();
+  }, []);
+
+  const compDemos = {
+    btn:    <ButtonDemo />,
+    badge:  <BadgeDemo />,
+    card:   <CardDemo />,
+    input:  <InputDemo />,
+    header: <HeaderDemo />,
+    tabbar: <TabBarDemo />,
+  };
+
+  return (
+    <div style={{display:'flex', minHeight:'100vh', fontFamily:"'Outfit',sans-serif"}}>
+
+      {/* ── Sidebar ── */}
+      <aside style={{width:216, background:'#2C4A2E', position:'fixed', top:0, left:0, bottom:0, display:'flex', flexDirection:'column', zIndex:100, overflowY:'auto'}}>
+        {/* Brand */}
+        <div style={{padding:'24px 20px 20px'}}>
+          <img src="uploads/logo sans Ice Tea.png" alt="ThéCol" style={{width:100, height:'auto', borderRadius:10, display:'block', marginBottom:10}} />
+          <div style={{color:'rgba(255,255,255,0.4)', fontSize:10}}>Design System v1.0</div>
+        </div>
+        {/* Nav */}
+        <nav style={{flex:1, padding:'0 10px'}}>
+          {NAV.map(n=>(
+            <a key={n.id} href={'#'+n.id} onClick={()=>setActiveNav(n.id)} style={{
+              display:'block', padding:'9px 12px', borderRadius:8, marginBottom:2, textDecoration:'none',
+              color: activeNav===n.id?'#B8D4A0':'rgba(255,255,255,0.55)',
+              background: activeNav===n.id?'rgba(93,123,62,0.4)':'transparent',
+              fontSize:13, fontWeight: activeNav===n.id?600:400,
+              transition:'all 0.15s',
+            }}>{n.label}</a>
+          ))}
+        </nav>
+        {/* Footer */}
+        <div style={{padding:'16px 20px', borderTop:'1px solid rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.3)', fontSize:11, lineHeight:1.5}}>
+          Kotlin / Java<br/>Mai 2026
+        </div>
+      </aside>
+
+      {/* ── Content ── */}
+      <main style={{marginLeft:216, flex:1, padding:'52px 56px 80px', maxWidth:'calc(100vw - 216px)'}}>
+
+        {/* Page header */}
+        <div style={{marginBottom:52}}>
+          <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:10}}>
+            <Tag green style={{fontSize:10}}>v1.0</Tag>
+            <Tag style={{fontSize:10}}>Android</Tag>
+            <Tag style={{fontSize:10}}>Material 3</Tag>
+          </div>
+          <h1 style={{fontSize:40, fontWeight:700, color:'#2A2A2A', lineHeight:1, marginBottom:10}}>Design System</h1>
+          <p style={{fontSize:14, color:'#888', maxWidth:540, lineHeight:1.7}}>
+            Tokens, composants et spec d'interactions pour l'app ThéCol — Android Kotlin/Java avec Material 3.
+            Cliquez sur une couleur ou un bloc de code pour copier la valeur.
+          </p>
+          <div style={{display:'flex', gap:12, marginTop:16}}>
+            <div style={{padding:'10px 16px', background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', textAlign:'center'}}>
+              <div style={{fontSize:20, fontWeight:700, color:'#5D7B3E'}}>{COLOR_GROUPS.reduce((s,g)=>s+g.tokens.length,0)}</div>
+              <div style={{fontSize:11, color:'#999', marginTop:2}}>couleurs</div>
+            </div>
+            <div style={{padding:'10px 16px', background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', textAlign:'center'}}>
+              <div style={{fontSize:20, fontWeight:700, color:'#5D7B3E'}}>{TYPE_SCALE.length}</div>
+              <div style={{fontSize:11, color:'#999', marginTop:2}}>styles typo</div>
+            </div>
+            <div style={{padding:'10px 16px', background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', textAlign:'center'}}>
+              <div style={{fontSize:20, fontWeight:700, color:'#5D7B3E'}}>{COMPONENTS.length}</div>
+              <div style={{fontSize:11, color:'#999', marginTop:2}}>composants</div>
+            </div>
+            <div style={{padding:'10px 16px', background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', textAlign:'center'}}>
+              <div style={{fontSize:20, fontWeight:700, color:'#5D7B3E'}}>3</div>
+              <div style={{fontSize:11, color:'#999', marginTop:2}}>fichiers XML</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ════ MARQUE ════ */}
+        <section id="marque" style={{marginBottom:72}}>
+          <SectionHdr title="Marque & Logo" sub="Identité visuelle ThéCol — utiliser ces fichiers source pour toutes les intégrations." />
+
+          {/* Logo showcase */}
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16, marginBottom:28}}>
+            {/* Sur fond clair */}
+            <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'28px 20px', display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+              <img src="uploads/logo sans Ice Tea.png" alt="ThéCol logo" style={{width:120, height:'auto'}} />
+              <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.5}}>Fond blanc</div>
+              <Tag style={{fontSize:10}}>Usage principal</Tag>
+            </div>
+            {/* Sur fond brand */}
+            <div style={{background:'#2C4A2E', borderRadius:12, padding:'28px 20px', display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+              <img src="uploads/logo sans Ice Tea.png" alt="ThéCol logo" style={{width:120, height:'auto', borderRadius:8}} />
+              <div style={{fontSize:11, fontWeight:600, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:0.5}}>Fond sombre</div>
+              <Tag green style={{fontSize:10}}>Header app</Tag>
+            </div>
+            {/* Sur fond app */}
+            <div style={{background:'#F5F5F0', borderRadius:12, border:'1px solid #EEEAE2', padding:'28px 20px', display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+              <img src="uploads/logo sans Ice Tea.png" alt="ThéCol logo" style={{width:120, height:'auto'}} />
+              <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.5}}>Fond app</div>
+              <Tag style={{fontSize:10}}>Splash screen</Tag>
+            </div>
+          </div>
+
+          {/* Logo specs */}
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:24}}>
+            <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'18px'}}>
+              <div style={{fontSize:13, fontWeight:600, marginBottom:12}}>Spécifications</div>
+              <SpecRow label="Format source" value="PNG 1280×1280px" />
+              <SpecRow label="Logo app icon" value="logo mail.jpg (77×77px)" />
+              <SpecRow label="Taille min. écran" value="80dp de large" />
+              <SpecRow label="Taille launcher icon" value="48 / 72 / 96 / 144 / 192dp" />
+              <SpecRow label="Espace de protection" value="≥ 16dp autour du logo" />
+              <SpecRow label="Fond logo" value="#C8F0C0 (mint — ne pas modifier)" />
+            </div>
+            <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'18px'}}>
+              <div style={{fontSize:13, fontWeight:600, marginBottom:12}}>Couleurs du logo</div>
+              <div style={{display:'flex', gap:10, marginBottom:12}}>
+                {[
+                  {name:'Vert texte',  hex:'#3CB043', note:'Wordmark principal'},
+                  {name:'Vert montagne', hex:'#2D7A35', note:'Illustration'},
+                  {name:'Fond mint',   hex:'#C8F0C0', note:'Background logo'},
+                ].map(c=>(
+                  <div key={c.hex} style={{flex:1, textAlign:'center'}}>
+                    <div style={{height:40, background:c.hex, borderRadius:8, marginBottom:6, border:'1px solid #E8E5DD'}}/>
+                    <div style={{fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:'#5D7B3E', marginBottom:2}}>{c.hex}</div>
+                    <div style={{fontSize:9, color:'#999'}}>{c.note}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{padding:'10px 12px', background:'#FFF8E8', borderRadius:8, fontSize:11, color:'#C8960A', lineHeight:1.5}}>
+                ⚠ Les couleurs du logo (vert vif) diffèrent du vert UI (#5D7B3E). Ne pas les mélanger.
+              </div>
+            </div>
+          </div>
+
+          {/* À ne pas faire */}
+          <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'18px'}}>
+            <div style={{fontSize:13, fontWeight:600, marginBottom:12}}>À ne pas faire</div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12}}>
+              {[
+                {rule:'Ne pas recadrer la montagne', icon:'✗'},
+                {rule:'Ne pas changer les couleurs', icon:'✗'},
+                {rule:'Ne pas ajouter d\'ombre portée', icon:'✗'},
+                {rule:'Ne pas étirer le logo', icon:'✗'},
+              ].map(r=>(
+                <div key={r.rule} style={{textAlign:'center', padding:'12px 8px', background:'#FFF5F5', borderRadius:8, border:'1px solid #F0E0E0'}}>
+                  <div style={{fontSize:18, color:'#C0392B', marginBottom:6}}>{r.icon}</div>
+                  <div style={{fontSize:11, color:'#888', lineHeight:1.4}}>{r.rule}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ════ COULEURS ════ */}
+        <section id="couleurs" style={{marginBottom:72}}>
+          <SectionHdr title="Couleurs" sub="Tous les tokens — déclarer dans res/values/colors.xml. Cliquer sur une swatch pour copier le hex." />
+          {COLOR_GROUPS.map(g=>(
+            <div key={g.label} style={{marginBottom:32}}>
+              <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.6, marginBottom:12}}>{g.label}</div>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))', gap:12}}>
+                {g.tokens.map(t=><Swatch key={t.token} {...t}/>)}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {/* ════ TYPOGRAPHIE ════ */}
+        <section id="typographie" style={{marginBottom:72}}>
+          <SectionHdr title="Typographie" sub="Police principale : Outfit (Google Fonts) — télécharger via res/font/ ou Downloadable Fonts." />
+          <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', overflow:'hidden', marginBottom:16}}>
+            {TYPE_SCALE.map((t,i)=>(
+              <div key={t.name} style={{display:'flex', alignItems:'center', gap:16, padding:'14px 20px', borderBottom:i<TYPE_SCALE.length-1?'1px solid #F0EDE6':'none', minHeight:56}}>
+                <div style={{flex:1, fontFamily:"'Outfit',sans-serif", fontSize:t.size, fontWeight:t.weight, lineHeight:t.lh, color:'#2A2A2A', minWidth:0, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>
+                  {t.name}
+                </div>
+                <div style={{display:'flex', gap:6, alignItems:'center', flexShrink:0}}>
+                  <Tag mono>{t.size}sp</Tag>
+                  <Tag mono>w{t.weight}</Tag>
+                  <div style={{fontSize:11, color:'#999', minWidth:180, textAlign:'right', lineHeight:1.3}}>{t.usage}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:'14px 18px', background:'#E8F2E0', borderRadius:10, fontSize:13, color:'#3D6A25', lineHeight:1.65}}>
+            <strong>Android :</strong> Ajouter Outfit via Google Fonts Downloadable dans Android Studio.
+            Déclarer dans <code style={{fontFamily:"'JetBrains Mono',monospace", fontSize:12}}>res/font/</code> avec
+            les variants <code style={{fontFamily:"'JetBrains Mono',monospace", fontSize:12}}>outfit_regular</code>,
+            <code style={{fontFamily:"'JetBrains Mono',monospace", fontSize:12}}>outfit_semibold</code>,
+            <code style={{fontFamily:"'JetBrains Mono',monospace", fontSize:12}}>outfit_bold</code>.
+            La section <strong>Section Label</strong> est toujours <strong>UPPERCASE + letterSpacing 0.04</strong>.
+          </div>
+        </section>
+
+        {/* ════ ESPACEMENTS ════ */}
+        <section id="espacements" style={{marginBottom:72}}>
+          <SectionHdr title="Espacements & Géométrie" sub="Grille de base : 4dp. Utiliser des multiples de 4 pour tous les paddings et marges." />
+
+          {/* Spacing visual */}
+          <div style={{marginBottom:32}}>
+            <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.6, marginBottom:12}}>Espacement</div>
+            <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'20px 24px', display:'flex', flexWrap:'wrap', gap:16, alignItems:'flex-end'}}>
+              {SPACING.map(s=>(
+                <div key={s} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8}}>
+                  <div style={{width:s, height:s, background:'linear-gradient(135deg,#5D7B3E,#8BA66B)', borderRadius:3, flexShrink:0}}/>
+                  <Tag mono style={{fontSize:10}}>{s}dp</Tag>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Radii */}
+          <div style={{marginBottom:32}}>
+            <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.6, marginBottom:12}}>Border Radius</div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))', gap:12}}>
+              {RADII.map(r=>(
+                <div key={r.name} style={{background:'#fff', borderRadius:10, border:'1px solid #EEEAE2', padding:'16px', textAlign:'center'}}>
+                  <div style={{width:52, height:52, background:'linear-gradient(135deg,#5D7B3E22,#5D7B3E55)', border:'2px solid #5D7B3E', borderRadius:Math.min(r.dp,26), margin:'0 auto 12px'}}/>
+                  <Tag mono style={{fontSize:10}}>{r.dp}dp</Tag>
+                  <div style={{fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:'#5D7B3E', marginTop:6}}>{r.name}</div>
+                  <div style={{fontSize:10, color:'#999', marginTop:4, lineHeight:1.3}}>{r.usage}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Elevation */}
+          <div>
+            <div style={{fontSize:11, fontWeight:600, color:'#888', textTransform:'uppercase', letterSpacing:0.6, marginBottom:12}}>Élévation</div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12}}>
+              {[
+                {name:'Card',   elev:'1dp', shade:'0 1px 3px rgba(0,0,0,0.05)', usage:'MaterialCardView standard'},
+                {name:'Header', elev:'0 + divider', shade:'borderBottom 1dp colorBorder', usage:'AppBar, Tab Bar'},
+                {name:'Dialog', elev:'4dp', shade:'0 8px 24px rgba(0,0,0,0.12)', usage:'Bottom Sheet, Dialogs'},
+              ].map(e=>(
+                <div key={e.name} style={{background:'#fff', borderRadius:12, padding:'18px', boxShadow:e.name==='Dialog'?'0 8px 24px rgba(0,0,0,0.12)':e.name==='Card'?'0 1px 3px rgba(0,0,0,0.05)':'none', border:e.name==='Header'?'1px solid #E0DDD5':'none'}}>
+                  <div style={{fontWeight:600, fontSize:14, marginBottom:6}}>{e.name}</div>
+                  <Tag mono style={{fontSize:11}}>{e.elev}</Tag>
+                  <div style={{fontSize:11, color:'#999', marginTop:8, lineHeight:1.4}}>{e.usage}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ════ COMPOSANTS ════ */}
+        <section id="composants" style={{marginBottom:72}}>
+          <SectionHdr title="Composants" sub="Démonstrations interactives + spécifications complètes pour l'implémentation Android." />
+
+          {COMPONENTS.map(c=>(
+            <div key={c.id} style={{marginBottom:40}}>
+              <div style={{fontSize:16, fontWeight:600, color:'#2A2A2A', marginBottom:12}}>{c.label}</div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start'}}>
+                <div>{compDemos[c.id]}</div>
+                <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'14px 18px'}}>
+                  {c.specs.map(([l,v])=><SpecRow key={l} label={l} value={v}/>)}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Step tracker */}
+          <div style={{marginBottom:40}}>
+            <div style={{fontSize:16, fontWeight:600, color:'#2A2A2A', marginBottom:12}}>Tracker progression</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start'}}>
+              <StepTrackerDemo/>
+              <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'14px 18px'}}>
+                <SpecRow label="États" value="done · current · pending"/>
+                <SpecRow label="Pastille done" value="24dp, bg colorSuccess, ✓ blanc"/>
+                <SpecRow label="Pastille current" value="24dp, bg colorWarningBg, border colorPrimary"/>
+                <SpecRow label="Pastille pending" value="24dp, bg #EDEAE3"/>
+                <SpecRow label="Connecteur" value="flex:1, h 2dp, colorSuccess si done"/>
+                <SpecRow label="Label actif" value="9sp, w600, colorPrimary"/>
+              </div>
+            </div>
+          </div>
+
+          {/* Avatars */}
+          <div style={{marginBottom:40}}>
+            <div style={{fontSize:16, fontWeight:600, color:'#2A2A2A', marginBottom:12}}>Avatars employés</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start'}}>
+              <AvatarDemo/>
+              <div style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', padding:'14px 18px'}}>
+                <SpecRow label="Fond" value="colorSuccessBg (#B8D4A0)"/>
+                <SpecRow label="Initiales" value="fontSize = size × 0.3, w700"/>
+                <SpecRow label="Dot live" value="size × 0.26, bg #3CA350, border 2dp blanc"/>
+                <SpecRow label="Tailles" value="30dp (sm) · 36dp (md) · 46dp (lg)"/>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ════ INTERACTIONS ════ */}
+        <section id="interactions" style={{marginBottom:72}}>
+          <SectionHdr title="Interactions & Navigation" sub="Spec des animations, transitions et comportements tactiles de l'app." />
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16}}>
+            {SPEC_INTERACTIONS.map(s=>(
+              <div key={s.title} style={{background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', overflow:'hidden'}}>
+                <div style={{padding:'14px 18px', borderBottom:'1px solid #F0EDE6', display:'flex', alignItems:'center', gap:10}}>
+                  <div style={{width:32, height:32, borderRadius:8, background:s.color+'18', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16}}>{s.icon}</div>
+                  <div style={{fontSize:14, fontWeight:600}}>{s.title}</div>
+                </div>
+                <div style={{padding:'6px 18px 14px'}}>
+                  {s.items.map(({label,value})=><SpecRow key={label} label={label} value={value}/>)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Navigation flow */}
+          <div style={{marginTop:24, background:'#fff', borderRadius:12, border:'1px solid #EEEAE2', overflow:'hidden'}}>
+            <div style={{padding:'14px 20px', borderBottom:'1px solid #F0EDE6', fontSize:14, fontWeight:600}}>Flux de navigation</div>
+            <div style={{padding:'20px', overflowX:'auto'}}>
+              <div style={{display:'flex', gap:0, alignItems:'center', minWidth:680}}>
+                {[
+                  {screen:'Dashboard',   note:'Accueil', color:'#5D7B3E'},
+                  {screen:'Commandes',   note:'Liste + calendrier', color:'#2E72B8'},
+                  {screen:'Détail cmd', note:'Slide-in', color:'#2E72B8'},
+                  {screen:'+ Commande', note:'Sheet modal', color:'#C8960A'},
+                ].map((n,i,arr)=>(
+                  <React.Fragment key={n.screen}>
+                    <div style={{textAlign:'center', minWidth:100}}>
+                      <div style={{width:72, height:72, borderRadius:12, background:n.color+'18', border:`2px solid ${n.color}`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 8px', fontSize:11, fontWeight:600, color:n.color, padding:4, textAlign:'center', lineHeight:1.3}}>{n.screen}</div>
+                      <div style={{fontSize:10, color:'#999'}}>{n.note}</div>
+                    </div>
+                    {i<arr.length-1&&<div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2, margin:'0 4px', marginBottom:18}}>
+                      <div style={{height:2, background:'#E0DDD5', width:'100%'}}/>
+                      <div style={{fontSize:9, color:'#AAA'}}>slide-in</div>
+                    </div>}
+                  </React.Fragment>
+                ))}
+              </div>
+              <div style={{display:'flex', gap:0, alignItems:'center', minWidth:680, marginTop:24}}>
+                {[
+                  {screen:'Pointage', note:'Accueil', color:'#C8960A'},
+                  {screen:'Stock',    note:'Accueil', color:'#7BB865'},
+                  {screen:'Inventaire',note:'Sous-module', color:'#7BB865'},
+                  {screen:'Production',note:'Sous-module', color:'#7BB865'},
+                ].map((n,i,arr)=>(
+                  <React.Fragment key={n.screen}>
+                    <div style={{textAlign:'center', minWidth:100}}>
+                      <div style={{width:72, height:72, borderRadius:12, background:n.color+'18', border:`2px solid ${n.color}`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 8px', fontSize:11, fontWeight:600, color:n.color, padding:4, textAlign:'center', lineHeight:1.3}}>{n.screen}</div>
+                      <div style={{fontSize:10, color:'#999'}}>{n.note}</div>
+                    </div>
+                    {i<arr.length-1&&<div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2, margin:'0 4px', marginBottom:18}}>
+                      <div style={{height:2, background:'#E0DDD5', width:'100%'}}/>
+                      <div style={{fontSize:9, color:'#AAA'}}>{i===0?'tab':'nav'}</div>
+                    </div>}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ════ ANDROID XML ════ */}
+        <section id="android-xml" style={{marginBottom:72}}>
+          <SectionHdr title="Android XML" sub="Fichiers prêts à copier dans votre projet. Cliquer sur 'copier' pour récupérer le contenu complet." />
+          <CodeBlock code={XML_COLORS} label="res/values/colors.xml" />
+          <CodeBlock code={XML_DIMENS} label="res/values/dimens.xml" />
+          <CodeBlock code={XML_THEMES} label="res/values/themes.xml" />
+
+          {/* Notes */}
+          <div style={{marginTop:20, background:'#E8F2E0', borderRadius:12, padding:'20px 24px', fontSize:13, color:'#3D6A25', lineHeight:1.75}}>
+            <div style={{fontSize:14, fontWeight:700, marginBottom:10}}>Notes d'implémentation</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
+              {[
+                ['Font Google', 'Télécharger Outfit via Downloadable Fonts dans Android Studio (File > New > More > Download Fonts)'],
+                ['Material 3', "Dépendance : com.google.android.material:material:1.11.0+"],
+                ['Navigation', 'Jetpack Navigation Component pour les transitions slide (navOptions{})'],
+                ['Bottom Nav', 'NavigationBar (Material 3) + NavigationBarItem — NavigationUI.setupWithNavController()'],
+                ['Logo', 'À définir — ajouter en format SVG dans res/drawable/ une fois fourni'],
+                ['Dark mode', 'Non spécifié pour l\'instant — prévoir res/values-night/colors.xml'],
+              ].map(([k,v])=>(
+                <div key={k} style={{background:'rgba(255,255,255,0.5)', borderRadius:8, padding:'10px 12px'}}>
+                  <div style={{fontWeight:600, marginBottom:3}}>{k}</div>
+                  <div style={{fontSize:12, color:'#4A7A34', lineHeight:1.5}}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

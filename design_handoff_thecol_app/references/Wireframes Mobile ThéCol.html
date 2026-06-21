@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThéCol Mobile — Wireframes</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Caveat:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Outfit',sans-serif; background:#f0ede8; }
+.sketch { font-family:'Caveat',cursive; }
+</style>
+</head>
+<body>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const T = {
+  primary:'#5D7B3E', primaryDark:'#4A6530', primaryLight:'#8BA66B',
+  accent:'#2C4A2E', bg:'#F5F5F0', white:'#fff',
+  text:'#2A2A2A', textLight:'#777', textLighter:'#999',
+  border:'#E0DDD5', borderLight:'#EEEAE2',
+};
+const WF = {
+  green:'#B8D4A0', greenDark:'#9BBD82',
+  yellow:'#F0D9A0', yellowDark:'#E0BF7A',
+  red:'#E8B4AF', redDark:'#D08580',
+  blue:'#A8C8E8', blueDark:'#7DA8D8',
+  block:'#E8E5DD', blockDark:'#D5D0C5',
+  line:'#D8D3C8', text:'#444', textLight:'#888',
+};
+
+// ─── Primitives ───
+const L = ({size=12, color=WF.text, bold=false, children, style={}}) => (
+  <span style={{fontSize:size, color, fontWeight:bold?600:400, lineHeight:1.3, ...style}}>{children}</span>
+);
+const Pill = ({children, color=WF.block, textColor=WF.text, size=10}) => (
+  <span style={{background:color, color:textColor, borderRadius:20, padding:'2px 8px', fontSize:size, fontWeight:500, whiteSpace:'nowrap', display:'inline-block'}}>{children}</span>
+);
+const Card = ({children, style={}, onClick}) => (
+  <div onClick={onClick} style={{background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.04)', ...style}}>{children}</div>
+);
+const Btn = ({children, primary=false, ghost=false, w='auto', size='md', style={}}) => {
+  const h = size==='sm'?28:size==='lg'?44:36;
+  const bg = primary?T.primary:ghost?'transparent':WF.block;
+  const c = primary?'#fff':WF.text;
+  return <div style={{height:h, padding:'0 14px', borderRadius:8, background:bg, color:c, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:600, width:w, border:ghost?`1px solid ${WF.line}`:'none', ...style}}>{children}</div>;
+};
+const Input = ({placeholder='', value='', h=40}) => (
+  <div style={{height:h, border:`1px solid ${WF.line}`, borderRadius:10, background:'#fff', padding:'0 12px', display:'flex', alignItems:'center'}}>
+    <L size={13} color={value?WF.text:WF.textLight}>{value||placeholder}</L>
+  </div>
+);
+const Section = ({title, action, children, style={}}) => (
+  <div style={{padding:'8px 16px 4px', ...style}}>
+    {title && <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8}}>
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5}}>{title}</L>
+      {action && <L size={12} color={T.primary}>{action}</L>}
+    </div>}
+    {children}
+  </div>
+);
+
+// ─── Bottom Tab Bar ───
+const TabBar = ({active='Dashboard'}) => {
+  const tabs = [
+    {icon:'⊞', label:'Accueil', key:'Dashboard'},
+    {icon:'◧', label:'Commandes', key:'Commandes', badge:3},
+    {icon:'◷', label:'Pointage', key:'Pointage'},
+    {icon:'◫', label:'Stock', key:'Stock'},
+    {icon:'☰', label:'Plus', key:'Plus'},
+  ];
+  return (
+    <div style={{
+      background:'rgba(255,255,255,0.96)', borderTop:`1px solid ${WF.line}`,
+      display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'6px 0 24px',
+      backdropFilter:'blur(20px)'
+    }}>
+      {tabs.map(t => (
+        <div key={t.key} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:3, padding:'4px 0', position:'relative'}}>
+          <div style={{position:'relative'}}>
+            <span style={{fontSize:22, opacity:t.key===active?1:0.42, color:t.key===active?T.primary:WF.text}}>{t.icon}</span>
+            {t.badge && <div style={{position:'absolute', top:-2, right:-6, background:'#E55', color:'#fff', borderRadius:8, fontSize:9, fontWeight:700, padding:'1px 4px', minWidth:14, textAlign:'center', border:'1.5px solid #fff'}}>{t.badge}</div>}
+          </div>
+          <L size={10} color={t.key===active?T.primary:WF.textLight} bold={t.key===active}>{t.label}</L>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── Mobile Header ───
+const MHeader = ({title, left, right, big=false}) => (
+  <div style={{
+    background:'#fff', borderBottom:`1px solid ${WF.line}`,
+    padding: big?'8px 16px 14px':'10px 16px',
+    display:'flex', alignItems:'center', gap:8, flexShrink:0
+  }}>
+    {left && <L size={14} color={T.primary}>{left}</L>}
+    <div style={{flex:1}}>
+      {big ? <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:24, color:T.text}}>{title}</div>
+        : <L size={15} bold color={T.text}>{title}</L>}
+    </div>
+    {right}
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: DASHBOARD — 3 variations
+// ═══════════════════════════════════════════════════════════
+
+// V1: Hero gradient + KPIs + commandes urgentes + actions
+const DashV1 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    {/* Hero */}
+    <div style={{background:`linear-gradient(135deg, ${T.primary} 0%, ${T.accent} 100%)`, padding:'56px 18px 18px', color:'#fff'}}>
+      <L size={12} color='rgba(255,255,255,0.7)'>Mercredi 7 mai</L>
+      <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:26, marginTop:2, marginBottom:14}}>Bonjour Philippe 👋</div>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8}}>
+        {[['1 240','en stock'],['3','commandes'],['2⚠','alertes']].map(([v,l])=>(
+          <div key={l} style={{background:'rgba(255,255,255,0.12)', borderRadius:10, padding:'8px 10px', backdropFilter:'blur(10px)'}}>
+            <div style={{fontSize:18, fontWeight:700}}>{v}</div>
+            <L size={10} color='rgba(255,255,255,0.7)'>{l}</L>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'14px 0'}}>
+      {/* Alertes */}
+      <Section>
+        <Card style={{padding:'12px 14px', background:WF.red+'40', border:`1px solid ${WF.redDark}55`}}>
+          <div style={{display:'flex', alignItems:'center', gap:10}}>
+            <div style={{width:36, height:36, borderRadius:18, background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16}}>⚠</div>
+            <div style={{flex:1}}>
+              <L size={13} bold>2 alertes actives</L>
+              <div><L size={11} color={WF.textLight}>Capsules 25cl, lot Citron</L></div>
+            </div>
+            <L size={18} color={WF.textLight}>›</L>
+          </div>
+        </Card>
+      </Section>
+      {/* Commandes urgentes */}
+      <Section title="À livrer cette semaine" action="Tout voir →">
+        {[
+          {c:'Café du Nord',d:'demain',art:'Citron 50cl ×60',s:'en attente',color:WF.yellow},
+          {c:'Migros Nyon',d:'09.05',art:'Pêche 25cl ×120',s:'produite',color:WF.blue},
+          {c:'Boutique Thé',d:'12.05',art:'Nature 1L ×20',s:'en attente',color:WF.yellow},
+        ].map(({c,d,art,s,color},i)=>(
+          <Card key={c} style={{padding:'10px 12px', marginBottom:6, borderLeft:`4px solid ${color}`}}>
+            <div style={{display:'flex', alignItems:'flex-start', gap:8}}>
+              <div style={{flex:1}}>
+                <div style={{display:'flex', alignItems:'center', gap:6}}>
+                  <L size={13} bold>{c}</L>
+                  <Pill color={color}>{s}</Pill>
+                </div>
+                <L size={11} color={WF.textLight}>{art} · livraison {d}</L>
+              </div>
+              <L size={18} color={WF.textLight}>›</L>
+            </div>
+          </Card>
+        ))}
+      </Section>
+      {/* Actions rapides */}
+      <Section title="Actions rapides">
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
+          {[['+ Commande',true],['⏱ Pointer',false],['+ Lot stock',false],['📦 Inventaire',false]].map(([l,p])=>(
+            <Btn key={l} primary={p} size="md" w="100%">{l}</Btn>
+          ))}
+        </div>
+      </Section>
+      {/* Activité */}
+      <Section title="Aujourd'hui">
+        {[['◷','Marie D. a pointé arrivée','08:00'],['⊞','Lot Citron #24 ajouté','07:32'],['◧','Commande #042 créée','hier 18:14']].map(([ic,m,t])=>(
+          <div key={m} style={{display:'flex', gap:10, padding:'8px 0', borderBottom:`1px solid ${WF.line}`}}>
+            <span style={{fontSize:14, opacity:0.5}}>{ic}</span>
+            <L size={12} style={{flex:1}}>{m}</L>
+            <L size={11} color={WF.textLight}>{t}</L>
+          </div>
+        ))}
+      </Section>
+    </div>
+    <TabBar active="Dashboard" />
+  </div>
+);
+
+// V2: Card-stack focus jour + grand bouton pointer
+const DashV2 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <div style={{padding:'56px 18px 0 18px', background:'#fff'}}>
+      <L size={12} color={WF.textLight}>Mercredi 7 mai</L>
+      <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:28, color:T.text, marginTop:2}}>Aujourd'hui</div>
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'16px'}}>
+      {/* Grande carte pointage */}
+      <Card style={{padding:'18px', marginBottom:14, background:T.accent, color:'#fff'}}>
+        <L size={11} color='rgba(255,255,255,0.65)'>POINTAGE</L>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginTop:4}}>
+          <div>
+            <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:36, lineHeight:1, color:'#fff'}}>14:32</div>
+            <L size={11} color='rgba(255,255,255,0.7)' style={{marginTop:4, display:'block'}}>Tu n'as pas encore pointé</L>
+          </div>
+        </div>
+        <div style={{marginTop:14, background:'rgba(255,255,255,0.95)', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10}}>
+          <span style={{fontSize:18}}>⏱</span>
+          <L size={14} bold color={T.text} style={{flex:1}}>Pointer mon arrivée</L>
+          <L size={16} color={T.primary}>›</L>
+        </div>
+      </Card>
+      {/* À faire */}
+      <Card style={{padding:'14px', marginBottom:14}}>
+        <div style={{display:'flex', justifyContent:'space-between', marginBottom:10}}>
+          <L size={13} bold>3 choses à faire</L>
+          <L size={11} color={WF.textLight}>aujourd'hui</L>
+        </div>
+        {[
+          {l:'Préparer cmd Café du Nord',sub:'Citron 50cl ×60',done:false},
+          {l:'Vérifier stock capsules',sub:'12 restantes',done:false},
+          {l:'Pointer Marie',sub:'arrivée 08:00',done:true},
+        ].map(({l,sub,done})=>(
+          <div key={l} style={{display:'flex', gap:10, padding:'8px 0', borderBottom:`1px solid ${WF.line}`, alignItems:'center'}}>
+            <div style={{width:22, height:22, borderRadius:11, border:`2px solid ${done?T.primary:WF.line}`, background:done?T.primary:'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+              {done && <L size={12} color='#fff' bold>✓</L>}
+            </div>
+            <div style={{flex:1}}>
+              <L size={13} style={{textDecoration:done?'line-through':'none', color:done?WF.textLight:WF.text}}>{l}</L>
+              <div><L size={10} color={WF.textLight}>{sub}</L></div>
+            </div>
+          </div>
+        ))}
+      </Card>
+      {/* Stats compactes */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14}}>
+        <Card style={{padding:'12px'}}>
+          <L size={11} color={WF.textLight}>Stock total</L>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:22, color:T.primary}}>1 240</div>
+          <L size={10} color={WF.textLight}>↑ +48 cette semaine</L>
+        </Card>
+        <Card style={{padding:'12px'}}>
+          <L size={11} color={WF.textLight}>Commandes</L>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:22, color:T.primary}}>3</div>
+          <L size={10} color={WF.yellowDark}>2 urgentes</L>
+        </Card>
+      </div>
+      {/* Alertes inline */}
+      <Card style={{padding:'12px 14px', background:WF.yellow+'55'}}>
+        <L size={11} bold color={WF.text}>⚠ Capsules 25cl — stock bas</L>
+        <div><L size={10} color={WF.textLight}>12 restantes (seuil: 50)</L></div>
+      </Card>
+    </div>
+    <TabBar active="Dashboard" />
+  </div>
+);
+
+// V3: Liste timeline / activité prioritaire
+const DashV3 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Accueil" big right={<div style={{width:36, height:36, borderRadius:18, background:WF.green, display:'flex', alignItems:'center', justifyContent:'center'}}><L size={12} bold>P</L></div>} />
+    <div style={{flex:1, overflow:'auto', padding:'8px 0'}}>
+      {/* Bandeau urgent */}
+      <div style={{padding:'10px 16px', background:WF.red+'55'}}>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{width:8, height:8, borderRadius:4, background:WF.redDark}}/>
+          <L size={11} bold color={WF.text}>1 commande à livrer DEMAIN</L>
+          <div style={{flex:1}}/>
+          <L size={11} color={T.primary}>Voir</L>
+        </div>
+      </div>
+      {/* Sections plates */}
+      <Section title="Commandes en cours">
+        {[
+          {c:'Café du Nord',d:'demain',s:'en attente',c2:WF.yellow},
+          {c:'Migros Nyon',d:'09.05',s:'produite',c2:WF.blue},
+          {c:'Boutique Thé',d:'12.05',s:'en attente',c2:WF.yellow},
+        ].map(({c,d,s,c2})=>(
+          <div key={c} style={{display:'flex', gap:12, padding:'10px 0', borderBottom:`1px solid ${WF.line}`, alignItems:'center'}}>
+            <div style={{width:4, height:32, background:c2, borderRadius:2}}/>
+            <div style={{flex:1}}>
+              <L size={13} bold>{c}</L>
+              <div><L size={11} color={WF.textLight}>livraison {d}</L></div>
+            </div>
+            <Pill color={c2}>{s}</Pill>
+          </div>
+        ))}
+      </Section>
+      <Section title="Stock par arôme">
+        {[['Citron','#c8e4a0',340],['Pêche','#f5d4a0',220],['Fraise','#f5b8b8',180],['Nature','#d4d4c8',500]].map(([a,c,v])=>(
+          <div key={a} style={{display:'flex', alignItems:'center', gap:10, padding:'7px 0'}}>
+            <div style={{width:10,height:10,borderRadius:5,background:c}}/>
+            <L size={12} style={{minWidth:60}}>{a}</L>
+            <div style={{flex:1, height:6, background:WF.block, borderRadius:3}}>
+              <div style={{width:`${(v/500)*100}%`, height:'100%', background:WF.greenDark, borderRadius:3}}/>
+            </div>
+            <L size={12} bold color={T.primary}>{v}</L>
+          </div>
+        ))}
+      </Section>
+      <Section title="Pointage du jour">
+        <Card style={{padding:'10px 12px'}}>
+          {[{n:'Marie D.',h:'08:00 → 16:30',t:'8h00'},{n:'Thomas L.',h:'09:00 → en cours',t:'5h32', live:true}].map(e=>(
+            <div key={e.n} style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0', borderBottom:`1px solid ${WF.line}`}}>
+              <div style={{width:30, height:30, borderRadius:15, background:e.live?WF.green:WF.block, display:'flex', alignItems:'center', justifyContent:'center', position:'relative'}}>
+                <L size={11} bold>{e.n[0]}</L>
+                {e.live && <div style={{position:'absolute', top:-1, right:-1, width:8, height:8, borderRadius:4, background:'#3CA350', border:'1.5px solid #fff'}}/>}
+              </div>
+              <div style={{flex:1}}>
+                <L size={12} bold>{e.n}</L>
+                <div><L size={10} color={WF.textLight}>{e.h}</L></div>
+              </div>
+              <Pill color={e.live?WF.green:WF.block}>{e.t}</Pill>
+            </div>
+          ))}
+        </Card>
+      </Section>
+    </div>
+    <TabBar active="Dashboard" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: POINTAGE — 2 variations
+// ═══════════════════════════════════════════════════════════
+
+// V1: Grande horloge + qui pointe + boutons IN/OUT
+const PointageV1 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Pointage" big />
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Horloge */}
+      <Card style={{padding:'24px 16px', textAlign:'center', marginBottom:14, background:`linear-gradient(135deg, ${T.primary}, ${T.accent})`, color:'#fff'}}>
+        <L size={11} color='rgba(255,255,255,0.7)'>Mercredi 7 mai</L>
+        <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:54, marginTop:4, letterSpacing:2}}>14:32</div>
+        <L size={12} color='rgba(255,255,255,0.7)'>Pointer maintenant</L>
+      </Card>
+      {/* Qui pointe — grandes puces */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Qui pointe ?</L>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14}}>
+        {[
+          {n:'Philippe',sel:true},{n:'Marie',sel:false,info:'08:00 →'},
+          {n:'Thomas',sel:false,info:'live',live:true},{n:'Pierre',sel:false},
+        ].map(({n,sel,info,live})=>(
+          <Card key={n} style={{padding:'14px 12px', border:sel?`2px solid ${T.primary}`:`1px solid ${WF.line}`, background:sel?WF.green+'40':'#fff'}}>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <div style={{width:34, height:34, borderRadius:17, background:WF.green, display:'flex', alignItems:'center', justifyContent:'center', position:'relative'}}>
+                <L size={13} bold>{n[0]}</L>
+                {live && <div style={{position:'absolute', top:0, right:0, width:8, height:8, borderRadius:4, background:'#3CA350', border:'1.5px solid #fff'}}/>}
+              </div>
+              <div style={{flex:1}}>
+                <L size={13} bold>{n}</L>
+                {info && <div><L size={10} color={WF.textLight}>{info}</L></div>}
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      {/* Boutons */}
+      <div style={{display:'flex', gap:8, marginBottom:14}}>
+        <Btn primary size="lg" w="50%">⏱ Arrivée</Btn>
+        <Btn size="lg" w="50%" style={{background:WF.red, color:WF.text}}>⏹ Départ</Btn>
+      </div>
+      {/* Saisie manuelle */}
+      <Card style={{padding:'14px', marginBottom:14}}>
+        <L size={12} bold style={{display:'block', marginBottom:10}}>Saisie manuelle</L>
+        <div style={{display:'flex', gap:6, marginBottom:8}}>
+          {['Marie D.','Thomas L.','Philippe','Pierre'].map((e,i)=>(
+            <div key={e} style={{
+              flex:1, height:34, borderRadius:8,
+              background:i===0?WF.green:'#fff',
+              border:`1.5px solid ${i===0?WF.greenDark:WF.line}`,
+              display:'flex', alignItems:'center', justifyContent:'center'
+            }}>
+              <L size={10} bold={i===0} color={i===0?T.accent:WF.textLight}>{e.split(' ')[0]}</L>
+            </div>
+          ))}
+        </div>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:8}}>
+          {[['Arrivée','08:00'],['Départ','16:30'],['Pause','30 min']].map(([l,p])=>(
+            <div key={l}>
+              <L size={9} color={WF.textLight} style={{display:'block', marginBottom:3}}>{l}</L>
+              <Input placeholder={p} h={36} />
+            </div>
+          ))}
+        </div>
+        <Btn primary size="md" w="100%">Enregistrer</Btn>
+      </Card>
+      {/* Mini stats semaine */}
+      <Card style={{padding:'12px 14px'}}>
+        <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5}}>Cette semaine</L>
+        {[['Marie D.','22h30'],['Thomas L.','28h00'],['Philippe','18h00']].map(([n,h])=>(
+          <div key={n} style={{display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:`1px solid ${WF.line}`}}>
+            <L size={12}>{n}</L>
+            <L size={12} bold color={T.primary}>{h}</L>
+          </div>
+        ))}
+      </Card>
+    </div>
+    <TabBar active="Pointage" />
+  </div>
+);
+
+// V2: Saisie manuelle + historique focus
+const PointageV2 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Pointage" big right={<Btn primary size="sm">+</Btn>} />
+    {/* Tabs */}
+    <div style={{display:'flex', background:'#fff', borderBottom:`1px solid ${WF.line}`, padding:'0 16px'}}>
+      {['Aujourd\'hui','Semaine','Tous'].map((t,i)=>(
+        <div key={t} style={{padding:'10px 14px', borderBottom:i===0?`2px solid ${T.primary}`:'2px solid transparent', marginBottom:-1}}>
+          <L size={13} bold={i===0} color={i===0?T.primary:WF.textLight}>{t}</L>
+        </div>
+      ))}
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Live entries */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>En cours</L>
+      <Card style={{padding:'14px', marginBottom:12, border:`1px solid ${WF.greenDark}55`, background:WF.green+'30'}}>
+        <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:8}}>
+          <div style={{width:38, height:38, borderRadius:19, background:WF.green, display:'flex', alignItems:'center', justifyContent:'center', position:'relative'}}>
+            <L size={14} bold>T</L>
+            <div style={{position:'absolute', top:0, right:0, width:10, height:10, borderRadius:5, background:'#3CA350', border:'2px solid #fff'}}/>
+          </div>
+          <div style={{flex:1}}>
+            <L size={14} bold>Thomas L.</L>
+            <div><L size={11} color={WF.textLight}>Arrivée 09:00 · 5h32 écoulées</L></div>
+          </div>
+          <Btn size="sm" style={{background:WF.red, color:WF.text}}>⏹ Sortir</Btn>
+        </div>
+      </Card>
+      {/* Terminés */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Terminés aujourd'hui</L>
+      {[
+        {n:'Marie D.',h:'08:00 → 16:30',t:'8h00',p:'30min'},
+        {n:'Pierre M.',h:'07:30 → 12:00',t:'4h30',p:'—'},
+      ].map(e=>(
+        <Card key={e.n} style={{padding:'12px', marginBottom:8}}>
+          <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:6}}>
+            <div style={{width:30, height:30, borderRadius:15, background:WF.block, display:'flex', alignItems:'center', justifyContent:'center'}}>
+              <L size={11} bold>{e.n[0]}</L>
+            </div>
+            <L size={13} bold style={{flex:1}}>{e.n}</L>
+            <L size={13} bold color={T.primary}>{e.t}</L>
+          </div>
+          <div style={{display:'flex', gap:12, paddingLeft:40}}>
+            <L size={10} color={WF.textLight}>⏱ {e.h}</L>
+            <L size={10} color={WF.textLight}>☕ {e.p}</L>
+          </div>
+        </Card>
+      ))}
+      {/* Saisie manuelle CTA */}
+      <Btn ghost size="lg" w="100%" style={{marginTop:8}}>+ Saisie manuelle (oubli)</Btn>
+    </div>
+    <TabBar active="Pointage" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: COMMANDES — 2 variations + détail
+// ═══════════════════════════════════════════════════════════
+
+// V1: Liste filtrable
+const CommandesV1 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Commandes" big right={<Btn primary size="sm">+</Btn>} />
+    {/* Filtres pills */}
+    <div style={{padding:'10px 16px', background:'#fff', borderBottom:`1px solid ${WF.line}`, overflowX:'auto'}}>
+      <div style={{display:'flex', gap:6}}>
+        {['Toutes','En attente','Produite','Prête','Livrée'].map((s,i)=>(
+          <Pill key={s} color={i===0?T.primary:WF.block} textColor={i===0?'#fff':WF.text} size={12}>{s}</Pill>
+        ))}
+      </div>
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'10px 16px'}}>
+      {[
+        {n:'#042',c:'Café du Nord',d:'08.05',art:'Citron 50cl ×60',s:'en attente',color:WF.yellow,m:'480.-'},
+        {n:'#041',c:'Migros Nyon',d:'10.05',art:'Pêche 25cl ×120, Nature 1L ×20',s:'produite',color:WF.blue,m:'960.-'},
+        {n:'#040',c:'Boutique Thé',d:'06.05',art:'Fraise 25cl ×48',s:'livrée',color:WF.green,m:'288.-'},
+        {n:'#039',c:'Restaurant Lac',d:'01.05',art:'Nature 50cl ×30',s:'livrée',color:WF.green,m:'180.-'},
+      ].map(({n,c,d,art,s,color,m})=>(
+        <Card key={n} style={{padding:'12px', marginBottom:8, borderLeft:`4px solid ${color}`}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4}}>
+            <div>
+              <L size={10} color={WF.textLight}>{n}</L>
+              <L size={14} bold style={{display:'block'}}>{c}</L>
+            </div>
+            <Pill color={color}>{s}</Pill>
+          </div>
+          <L size={11} color={WF.textLight}>{art}</L>
+          <div style={{display:'flex', justifyContent:'space-between', marginTop:8, paddingTop:8, borderTop:`1px solid ${WF.line}`}}>
+            <L size={11} color={WF.textLight}>livraison <b>{d}</b></L>
+            <L size={12} bold color={T.primary}>CHF {m}</L>
+          </div>
+        </Card>
+      ))}
+    </div>
+    <TabBar active="Commandes" />
+  </div>
+);
+
+// V2: Vue calendrier livraisons
+const CommandesV2 = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Livraisons" big right={<L size={12} color={T.primary}>📋 Liste</L>} />
+    {/* Mini calendar week */}
+    <div style={{background:'#fff', borderBottom:`1px solid ${WF.line}`, padding:'12px 16px'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+        <L size={13} bold>Mai 2026</L>
+        <div style={{display:'flex', gap:6}}>
+          <Btn ghost size="sm">‹</Btn>
+          <Btn ghost size="sm">›</Btn>
+        </div>
+      </div>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4}}>
+        {[
+          {d:5,l:'L'},{d:6,l:'M'},{d:7,l:'M',today:true},{d:8,l:'J',count:1},
+          {d:9,l:'V',count:1},{d:10,l:'S'},{d:11,l:'D'}
+        ].map(({d,l,today,count})=>(
+          <div key={d} style={{textAlign:'center', padding:'6px 0', borderRadius:8, background:today?T.primary:'transparent', color:today?'#fff':WF.text}}>
+            <L size={9} color={today?'rgba(255,255,255,0.7)':WF.textLight}>{l}</L>
+            <div style={{fontSize:15, fontWeight:600, marginTop:2}}>{d}</div>
+            {count && <div style={{width:5, height:5, borderRadius:3, background:today?'#fff':WF.yellowDark, margin:'2px auto 0'}}/>}
+          </div>
+        ))}
+      </div>
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'14px 16px'}}>
+      {/* Demain */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Demain · jeudi 8 mai</L>
+      <Card style={{padding:'12px', marginBottom:14, borderLeft:`4px solid ${WF.yellow}`}}>
+        <div style={{display:'flex', alignItems:'flex-start', justifyContent:'space-between'}}>
+          <div>
+            <L size={14} bold>Café du Nord</L>
+            <div><L size={11} color={WF.textLight}>Lausanne · Citron 50cl ×60</L></div>
+          </div>
+          <Pill color={WF.yellow}>en attente</Pill>
+        </div>
+        <div style={{display:'flex', gap:6, marginTop:10}}>
+          <Btn primary size="sm" w="50%">→ Préparer</Btn>
+          <Btn size="sm" w="50%">📞 Appeler</Btn>
+        </div>
+      </Card>
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Vendredi 9 mai</L>
+      <Card style={{padding:'12px', borderLeft:`4px solid ${WF.blue}`}}>
+        <div style={{display:'flex', alignItems:'flex-start', justifyContent:'space-between'}}>
+          <div>
+            <L size={14} bold>Migros Nyon</L>
+            <div><L size={11} color={WF.textLight}>Nyon · Pêche 25cl ×120</L></div>
+          </div>
+          <Pill color={WF.blue}>produite</Pill>
+        </div>
+      </Card>
+    </div>
+    <TabBar active="Commandes" />
+  </div>
+);
+
+// V3: Détail d'une commande (drawer plein écran)
+const CommandeDetail = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="#042 Café du Nord" left="‹" right={<L size={14}>⋯</L>} />
+    <div style={{flex:1, overflow:'auto'}}>
+      {/* Status hero */}
+      <div style={{background:'#fff', padding:'14px 16px', borderBottom:`1px solid ${WF.line}`}}>
+        <Pill color={WF.yellow} size={11}>En attente</Pill>
+        <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:24, color:T.text, marginTop:8}}>CHF 480.–</div>
+        <L size={12} color={WF.textLight}>Livraison demain, 8 mai</L>
+      </div>
+      {/* Step tracker */}
+      <div style={{background:'#fff', padding:'14px 16px', borderBottom:`1px solid ${WF.line}`}}>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          {[{l:'Créée',d:true},{l:'Planif',c:true},{l:'Prod',d:false},{l:'BL',d:false},{l:'Livrée',d:false}].map((s,i,arr)=>(
+            <React.Fragment key={s.l}>
+              <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:3}}>
+                <div style={{width:22, height:22, borderRadius:11, background:s.d?WF.greenDark:s.c?WF.yellow:WF.block, border:s.c?`2px solid ${T.primary}`:'none', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                  <L size={10} bold color={s.d?'#fff':WF.text}>{s.d?'✓':i+1}</L>
+                </div>
+                <L size={9} bold={s.c} color={s.c?T.primary:WF.textLight}>{s.l}</L>
+              </div>
+              {i<arr.length-1 && <div style={{flex:1, height:2, background:s.d?WF.greenDark:WF.line, marginTop:-12}}/>}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+      {/* Actions */}
+      <Section title="Prochaine action">
+        <Card style={{padding:'12px', background:WF.yellow+'55'}}>
+          <L size={12} bold>Étape 2 — Planification</L>
+          <div><L size={11} color={WF.textLight} style={{display:'block', marginBottom:10}}>Pas encore planifiée en production.</L></div>
+          <Btn primary size="md" w="100%">→ Planifier en production</Btn>
+        </Card>
+      </Section>
+      {/* Articles */}
+      <Section title="Articles">
+        <Card style={{padding:'10px 12px'}}>
+          {[['Citron 50cl','×60','CHF 480.–']].map(([a,q,p])=>(
+            <div key={a} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0'}}>
+              <L size={13}>{a}</L>
+              <L size={11} color={WF.textLight}>{q}</L>
+              <L size={13} bold>{p}</L>
+            </div>
+          ))}
+        </Card>
+      </Section>
+      {/* Client */}
+      <Section title="Client">
+        <Card style={{padding:'12px'}}>
+          <L size={13} bold>Café du Nord</L>
+          <div><L size={11} color={WF.textLight}>Av. de la Gare 12, 1000 Lausanne</L></div>
+          <div style={{display:'flex', gap:6, marginTop:10}}>
+            <Btn ghost size="sm" w="50%">📞 021 123 45</Btn>
+            <Btn ghost size="sm" w="50%">📍 Itinéraire</Btn>
+          </div>
+        </Card>
+      </Section>
+    </div>
+    <TabBar active="Commandes" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// CRÉER UNE COMMANDE — formulaire mobile
+// ═══════════════════════════════════════════════════════════
+
+const CreateCmd = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Nouvelle commande" left="✕" right={<L size={13} color={T.primary} bold>Créer</L>} />
+    <div style={{flex:1, overflow:'auto', padding:'14px 16px'}}>
+      <Section title="Client">
+        <Input placeholder="Choisir un client…" h={44} />
+      </Section>
+      <Section title="Date de livraison">
+        <Input placeholder="08.05.2026" value="08.05.2026" h={44} />
+      </Section>
+      <Section title="Articles">
+        {/* Matrice arôme x format — saisie tactile */}
+        <Card style={{padding:'10px'}}>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 60px 60px 60px', gap:4, marginBottom:6}}>
+            {['','25cl','50cl','1L'].map(h=>(
+              <div key={h} style={{padding:'4px 6px', textAlign:'center'}}>
+                <L size={10} bold color={WF.textLight}>{h}</L>
+              </div>
+            ))}
+          </div>
+          {[
+            {a:'Citron',v:[0,60,0]},
+            {a:'Pêche',v:[0,0,0]},
+            {a:'Fraise',v:[0,0,0]},
+            {a:'Nature',v:[0,0,0]},
+          ].map(({a,v})=>(
+            <div key={a} style={{display:'grid', gridTemplateColumns:'1fr 60px 60px 60px', gap:4, marginBottom:4}}>
+              <div style={{padding:'8px 6px', display:'flex', alignItems:'center'}}>
+                <L size={12} bold>{a}</L>
+              </div>
+              {v.map((q,i)=>(
+                <div key={i} style={{
+                  height:36, borderRadius:8,
+                  background:q>0?WF.green:'#fff',
+                  border:`1.5px solid ${q>0?WF.greenDark:WF.line}`,
+                  display:'flex', alignItems:'center', justifyContent:'center'
+                }}>
+                  <L size={13} bold={q>0} color={q>0?T.primary:WF.textLight}>{q>0?q:'—'}</L>
+                </div>
+              ))}
+            </div>
+          ))}
+        </Card>
+        <L size={10} color={WF.textLight} className="sketch" style={{display:'block', marginTop:6}}>
+          Tape sur une cellule → stepper +/− apparaît
+        </L>
+      </Section>
+      <Section title="Total estimé">
+        <Card style={{padding:'14px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <L size={13}>1 article · 60 bouteilles</L>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:22, color:T.primary}}>CHF 480.–</div>
+        </Card>
+      </Section>
+    </div>
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: STOCK
+// ═══════════════════════════════════════════════════════════
+
+const StockMobile = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Stock" big right={<Btn primary size="sm">+</Btn>} />
+    {/* Search */}
+    <div style={{padding:'10px 16px', background:'#fff', borderBottom:`1px solid ${WF.line}`}}>
+      <Input placeholder="🔍 Rechercher un lot…" h={36} />
+    </div>
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Tiles par arôme */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14}}>
+        {[['Citron','#c8e4a0',340],['Pêche','#f5d4a0',220],['Fraise','#f5b8b8',180],['Nature','#d4d4c8',500]].map(([a,c,v])=>(
+          <Card key={a} style={{padding:'12px'}}>
+            <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:4}}>
+              <div style={{width:10,height:10,borderRadius:5,background:c}}/>
+              <L size={12} bold>{a}</L>
+            </div>
+            <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:24, color:T.primary}}>{v}</div>
+            <L size={10} color={WF.textLight}>bouteilles vendables</L>
+          </Card>
+        ))}
+      </div>
+      {/* Lots */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Lots récents</L>
+      {[
+        {a:'Citron',f:'50cl',q:120,d:'01.08.26',s:'ok',color:WF.green},
+        {a:'Pêche',f:'50cl',q:60,d:'15.06.26',s:'bientôt',color:WF.yellow},
+        {a:'Nature',f:'1L',q:20,d:'10.04.26',s:'expiré',color:WF.red},
+      ].map((l,i)=>(
+        <Card key={i} style={{padding:'12px', marginBottom:6, borderLeft:`4px solid ${l.color}`}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div>
+              <L size={13} bold>{l.a} {l.f}</L>
+              <div><L size={11} color={WF.textLight}>{l.q} bouteilles · DLC {l.d}</L></div>
+            </div>
+            <Pill color={l.color}>{l.s}</Pill>
+          </div>
+        </Card>
+      ))}
+    </div>
+    <TabBar active="Stock" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: PRODUCTION
+// ═══════════════════════════════════════════════════════════
+
+const ProductionMobile = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Production" big right={<L size={13} color={T.primary} bold>Calculer</L>} />
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Période */}
+      <Card style={{padding:'12px', marginBottom:14, display:'flex', gap:8, alignItems:'center'}}>
+        <div style={{flex:1}}>
+          <L size={10} color={WF.textLight}>Du</L>
+          <L size={13} bold color={T.text} style={{display:'block'}}>07.05</L>
+        </div>
+        <L size={16} color={WF.textLight}>→</L>
+        <div style={{flex:1}}>
+          <L size={10} color={WF.textLight}>Au</L>
+          <L size={13} bold color={T.text} style={{display:'block'}}>14.05</L>
+        </div>
+      </Card>
+      {/* Cuves */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Cuves à produire</L>
+      {[
+        {a:'Citron',c:'#c8e4a0', cuves:[{l:25,p:100},{l:15,p:60}]},
+        {a:'Pêche',c:'#f5d4a0', cuves:[{l:20,p:80}]},
+      ].map(({a,c,cuves})=>(
+        <Card key={a} style={{padding:'12px', marginBottom:8}}>
+          <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
+            <div style={{width:10,height:10,borderRadius:5,background:c}}/>
+            <L size={13} bold>{a}</L>
+            <div style={{flex:1}}/>
+            <L size={10} color={WF.textLight}>{cuves.length} cuves · {cuves.reduce((s,c)=>s+c.l,0)}L</L>
+          </div>
+          {cuves.map((cu,i)=>(
+            <div key={i} style={{display:'flex', alignItems:'center', gap:8, padding:'6px 0'}}>
+              <L size={11} color={WF.textLight} style={{minWidth:50}}>Cuve {i+1}</L>
+              <div style={{flex:1, height:8, background:WF.block, borderRadius:4}}>
+                <div style={{width:`${cu.p}%`, height:'100%', background:WF.greenDark, borderRadius:4}}/>
+              </div>
+              <L size={12} bold color={T.primary} style={{minWidth:36, textAlign:'right'}}>{cu.l}L</L>
+              <Btn primary size="sm">✓</Btn>
+            </div>
+          ))}
+        </Card>
+      ))}
+      {/* Ingrédients */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8, marginTop:14}}>Ingrédients</L>
+      <Card style={{padding:'4px 12px'}}>
+        {[
+          {n:'Thé noir',need:'500g',have:'2kg',ok:true},
+          {n:'Sucre',need:'2kg',have:'5kg',ok:true},
+          {n:'Arôme citron',need:'100mL',have:'80mL',ok:false},
+          {n:'Capsules 50cl',need:'180',have:'250',ok:true},
+        ].map(i=>(
+          <div key={i.n} style={{display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderBottom:`1px solid ${WF.line}`}}>
+            <L size={14}>{i.ok?'✓':'⚠'}</L>
+            <L size={12} style={{flex:1}}>{i.n}</L>
+            <L size={11} color={WF.textLight}>{i.need}</L>
+            <L size={11} color={i.ok?T.primary:'#C0392B'} bold>{i.have}</L>
+          </div>
+        ))}
+      </Card>
+    </div>
+    <TabBar active="Stock" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: INVENTAIRE
+// ═══════════════════════════════════════════════════════════
+
+const InventaireMobile = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Inventaire" big right={<Btn primary size="sm">+</Btn>} />
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Alertes */}
+      <Card style={{padding:'10px 12px', marginBottom:12, background:WF.red+'40'}}>
+        <L size={12} bold>⚠ 2 articles sous le seuil</L>
+        <div><L size={11} color={WF.textLight}>Capsules 25cl, Arôme citron</L></div>
+      </Card>
+      {/* Liste consommables avec steppers */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Consommables</L>
+      {[
+        {n:'Thé noir',q:'2 kg',ok:true},
+        {n:'Sucre de canne',q:'5 kg',ok:true},
+        {n:'Arôme citron',q:'80 mL',ok:false},
+        {n:'Capsules 25cl',q:'12 pcs',ok:false},
+        {n:'Capsules 50cl',q:'250 pcs',ok:true},
+        {n:'Étiquettes',q:'320 pcs',ok:true},
+      ].map(i=>(
+        <Card key={i.n} style={{padding:'12px', marginBottom:6}}>
+          <div style={{display:'flex', alignItems:'center', gap:8}}>
+            <div style={{width:6,height:6,borderRadius:3,background:i.ok?WF.greenDark:WF.redDark}}/>
+            <div style={{flex:1}}>
+              <L size={13} bold={!i.ok}>{i.n}</L>
+              <div><L size={11} color={i.ok?WF.textLight:'#C0392B'}>{i.q}{!i.ok?' · stock bas':''}</L></div>
+            </div>
+            <div style={{display:'flex', alignItems:'center', gap:4}}>
+              <Btn size="sm" style={{minWidth:32}}>−</Btn>
+              <Btn primary size="sm" style={{minWidth:32}}>+</Btn>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+    <TabBar active="Stock" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: COMPTABILITÉ
+// ═══════════════════════════════════════════════════════════
+
+const ComptaMobile = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Comptabilité" big right={<L size={13} color={T.primary} bold>+ Facture</L>} />
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Hero CA */}
+      <Card style={{padding:'18px', marginBottom:14, background:`linear-gradient(135deg, ${T.primary}, ${T.accent})`, color:'#fff'}}>
+        <L size={11} color='rgba(255,255,255,0.7)'>Revenus mai 2026</L>
+        <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:32, marginTop:4}}>CHF 4 280.–</div>
+        <div style={{display:'flex', gap:14, marginTop:10}}>
+          <div><L size={10} color='rgba(255,255,255,0.6)'>Encaissé</L><div style={{fontSize:14, fontWeight:600}}>2 940.–</div></div>
+          <div><L size={10} color='rgba(255,255,255,0.6)'>En attente</L><div style={{fontSize:14, fontWeight:600}}>1 340.–</div></div>
+          <div><L size={10} color='rgba(255,255,255,0.6)'>Marge</L><div style={{fontSize:14, fontWeight:600}}>62%</div></div>
+        </div>
+      </Card>
+      {/* Factures */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Factures récentes</L>
+      {[
+        {n:'F-042',c:'Café du Nord',m:'480.–',s:'envoyée',color:WF.yellow},
+        {n:'F-041',c:'Migros Nyon',m:'960.–',s:'payée',color:WF.green},
+        {n:'F-040',c:'Boutique Thé',m:'288.–',s:'en retard',color:WF.red},
+      ].map(f=>(
+        <Card key={f.n} style={{padding:'12px', marginBottom:6}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div>
+              <L size={10} color={WF.textLight}>{f.n}</L>
+              <L size={13} bold style={{display:'block'}}>{f.c}</L>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <L size={13} bold color={T.primary}>CHF {f.m}</L>
+              <div><Pill color={f.color} size={9}>{f.s}</Pill></div>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+    <TabBar active="Plus" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// PAGE: PLUS (drawer)
+// ═══════════════════════════════════════════════════════════
+
+const PlusPage = () => (
+  <div style={{display:'flex', flexDirection:'column', height:'100%', background:T.bg}}>
+    <MHeader title="Plus" big />
+    <div style={{flex:1, overflow:'auto', padding:'12px 16px'}}>
+      {/* Profil */}
+      <Card style={{padding:'14px', marginBottom:14, display:'flex', alignItems:'center', gap:12}}>
+        <div style={{width:48, height:48, borderRadius:24, background:WF.green, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <L size={18} bold>P</L>
+        </div>
+        <div style={{flex:1}}>
+          <L size={14} bold>Philippe Ong</L>
+          <div><L size={11} color={WF.textLight}>Patron · admin</L></div>
+        </div>
+        <L size={16} color={WF.textLight}>›</L>
+      </Card>
+      {/* Sections */}
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Modules</L>
+      <Card style={{padding:'4px 0', marginBottom:14}}>
+        {[
+          ['💰','Comptabilité','3 factures en retard','red'],
+          ['⚙','Production','2 cuves en cours',null],
+          ['📋','Inventaire','2 alertes stock','yellow'],
+          ['🚚','Livraisons','1 demain',null],
+        ].map(([ic,n,sub,c])=>(
+          <div key={n} style={{display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderBottom:`1px solid ${WF.line}`}}>
+            <span style={{fontSize:18}}>{ic}</span>
+            <div style={{flex:1}}>
+              <L size={13} bold>{n}</L>
+              <div><L size={11} color={c==='red'?'#C0392B':c==='yellow'?'#A07020':WF.textLight}>{sub}</L></div>
+            </div>
+            <L size={16} color={WF.textLight}>›</L>
+          </div>
+        ))}
+      </Card>
+      <L size={11} bold color={WF.textLight} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Paramètres</L>
+      <Card style={{padding:'4px 0'}}>
+        {['👥 Employés','🍃 Arômes','📐 Formats','📖 Recettes','💾 Sauvegarde','⚙ Préférences'].map(n=>(
+          <div key={n} style={{display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderBottom:`1px solid ${WF.line}`}}>
+            <L size={13} style={{flex:1}}>{n}</L>
+            <L size={16} color={WF.textLight}>›</L>
+          </div>
+        ))}
+      </Card>
+    </div>
+    <TabBar active="Plus" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════════════════
+
+const Phone = ({children}) => (
+  <div style={{display:'flex', justifyContent:'center', alignItems:'center', padding:20, background:WF.block+'66', width:'100%', height:'100%'}}>
+    <IOSDevice width={380} height={780}>{children}</IOSDevice>
+  </div>
+);
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "showCompta": true,
+  "showCreate": true
+}/*EDITMODE-END*/;
+
+const App = () => {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  return (
+    <>
+    <TweaksPanel>
+      <TweakSection title="Sections optionnelles">
+        <TweakToggle id="showCompta" label="Comptabilité" value={tweaks.showCompta} onChange={v=>setTweak('showCompta',v)} />
+        <TweakToggle id="showCreate" label="Créer commande" value={tweaks.showCreate} onChange={v=>setTweak('showCreate',v)} />
+      </TweakSection>
+    </TweaksPanel>
+
+    <DesignCanvas>
+      <DCSection id="dash" title="Dashboard mobile — direction retenue : V2">
+        <DCArtboard id="dash-2" label="V2 ★ — Focus jour: pointage + tâches" width={420} height={820}>
+          <Phone><DashV2/></Phone>
+        </DCArtboard>
+        <DCArtboard id="dash-1" label="V1 — Hero gradient + stats + commandes" width={420} height={820}>
+          <Phone><DashV1/></Phone>
+        </DCArtboard>
+        <DCArtboard id="dash-3" label="V3 — Liste timeline" width={420} height={820}>
+          <Phone><DashV3/></Phone>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="point" title="Pointage — direction retenue : V1">
+        <DCArtboard id="point-1" label="V1 ★ — Horloge + puces + saisie manuelle" width={420} height={960}>
+          <Phone><PointageV1/></Phone>
+        </DCArtboard>
+        <DCArtboard id="point-2" label="V2 — Liste live + historique" width={420} height={820}>
+          <Phone><PointageV2/></Phone>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="cmd" title="Commandes — direction retenue : V2">
+        <DCArtboard id="cmd-2" label="V2 ★ — Vue calendrier livraisons" width={420} height={820}>
+          <Phone><CommandesV2/></Phone>
+        </DCArtboard>
+        <DCArtboard id="cmd-1" label="V1 — Liste filtrable" width={420} height={820}>
+          <Phone><CommandesV1/></Phone>
+        </DCArtboard>
+        <DCArtboard id="cmd-detail" label="Détail commande (drawer)" width={420} height={820}>
+          <Phone><CommandeDetail/></Phone>
+        </DCArtboard>
+        {tweaks.showCreate && (
+          <DCArtboard id="cmd-create" label="Créer commande — matrice arôme×format" width={420} height={820}>
+            <Phone><CreateCmd/></Phone>
+          </DCArtboard>
+        )}
+      </DCSection>
+
+      <DCSection id="ops" title="Stock · Production · Inventaire">
+        <DCArtboard id="stock" label="Stock — tiles arômes + lots" width={420} height={820}>
+          <Phone><StockMobile/></Phone>
+        </DCArtboard>
+        <DCArtboard id="prod" label="Production — cuves + ingrédients" width={420} height={820}>
+          <Phone><ProductionMobile/></Phone>
+        </DCArtboard>
+        <DCArtboard id="inv" label="Inventaire — steppers tactiles" width={420} height={820}>
+          <Phone><InventaireMobile/></Phone>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="more" title="Plus & Comptabilité">
+        <DCArtboard id="plus" label="Plus — drawer modules + paramètres" width={420} height={820}>
+          <Phone><PlusPage/></Phone>
+        </DCArtboard>
+        {tweaks.showCompta && (
+          <DCArtboard id="compta" label="Comptabilité — hero CA + factures" width={420} height={820}>
+            <Phone><ComptaMobile/></Phone>
+          </DCArtboard>
+        )}
+      </DCSection>
+    </DesignCanvas>
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<div id="root" style="width:100vw;height:100vh;overflow:hidden;"></div>
+</body>
+</html>

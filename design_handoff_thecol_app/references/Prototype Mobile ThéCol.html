@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThéCol — Prototype Mobile</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; font-family:'Outfit',sans-serif; background:#e8e4dc; }
+#root { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+
+/* Screen transitions */
+.screen-enter { animation: slideIn 0.28s cubic-bezier(0.32,0,0.18,1) forwards; }
+.screen-back  { animation: slideBack 0.28s cubic-bezier(0.32,0,0.18,1) forwards; }
+@keyframes slideIn   { from { transform:translateX(100%); } to { transform:translateX(0); } }
+@keyframes slideBack { from { transform:translateX(-30%); } to { transform:translateX(0); } }
+
+/* Toast */
+.toast { position:absolute; bottom:100px; left:50%; transform:translateX(-50%);
+  background:rgba(30,30,30,0.88); color:#fff; borderRadius:20px; padding:9px 16px;
+  font-size:13px; font-weight:500; white-space:nowrap; z-index:999;
+  animation: toastIn 0.2s ease, toastOut 0.3s ease 1.6s forwards; }
+@keyframes toastIn  { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; } }
+
+/* Tap ripple */
+.tap { cursor:pointer; -webkit-tap-highlight-color:rgba(0,0,0,0.06); transition:opacity 0.12s; }
+.tap:active { opacity:0.65; }
+
+/* Scrollable content */
+.scroll { overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.scroll::-webkit-scrollbar { display:none; }
+</style>
+</head>
+<body>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Tokens ──────────────────────────────────────────────────────────────────
+const C = {
+  primary:'#5D7B3E', dark:'#2C4A2E', light:'#8BA66B',
+  bg:'#F5F5F0', white:'#fff', text:'#2A2A2A',
+  textLight:'#777', textLighter:'#aaa',
+  border:'#E0DDD5', borderLight:'#EEEAE2',
+  green:'#B8D4A0', greenDark:'#7BB865',
+  yellow:'#F0D9A0', yellowDark:'#C8960A',
+  red:'#E8B4AF', redDark:'#C0392B',
+  blue:'#A8C8E8', blueDark:'#2E72B8',
+};
+
+// ─── Primitives ──────────────────────────────────────────────────────────────
+const Txt = ({s=13, w=400, c=C.text, children, style={}}) =>
+  <span style={{fontSize:s, fontWeight:w, color:c, lineHeight:1.35, ...style}}>{children}</span>;
+
+const Pill = ({children, bg=C.green, c=C.text, s=10}) =>
+  <span style={{background:bg, color:c, borderRadius:20, padding:'2px 9px', fontSize:s, fontWeight:500, display:'inline-block', whiteSpace:'nowrap'}}>{children}</span>;
+
+const Card = ({children, style={}, onClick}) =>
+  <div onClick={onClick} className={onClick?'tap':''} style={{background:C.white, borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.05)', ...style}}>{children}</div>;
+
+const Btn = ({children, primary=false, danger=false, ghost=false, w='auto', h=36, s=13, onClick, style={}}) => {
+  const bg = primary?C.primary : danger?C.redDark : ghost?'transparent' : '#EDEAE3';
+  const fc = primary||danger ? '#fff' : C.text;
+  return <div onClick={onClick} className="tap" style={{height:h, padding:'0 16px', borderRadius:10, background:bg, color:fc, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:s, fontWeight:600, width:w, border:ghost?`1.5px solid ${C.border}`:'none', cursor:'pointer', ...style}}>{children}</div>;
+};
+
+const Input = ({label, placeholder, value='', h=40, note}) => (
+  <div style={{marginBottom:note?4:0}}>
+    {label && <Txt s={10} c={C.textLight} style={{display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:0.4, fontWeight:600}}>{label}</Txt>}
+    <div style={{height:h, border:`1.5px solid ${C.border}`, borderRadius:10, background:C.white, padding:'0 12px', display:'flex', alignItems:'center'}}>
+      <Txt s={13} c={value?C.text:C.textLighter}>{value||placeholder}</Txt>
+    </div>
+    {note && <Txt s={10} c={C.textLighter} style={{display:'block', marginTop:3}}>{note}</Txt>}
+  </div>
+);
+
+const Divider = ({my=0}) => <div style={{height:1, background:C.borderLight, margin:`${my}px 0`}}/>;
+
+const statusColor = (s) => s==='livrée'?C.green : s==='produite'?C.blue : s==='en attente'?C.yellow : s==='payée'?C.green : s==='en retard'?C.red : '#E8E5DD';
+
+// ─── Router / Toast ───────────────────────────────────────────────────────────
+const RouterContext = React.createContext({});
+const useRouter = () => React.useContext(RouterContext);
+
+const ToastContext = React.createContext(() => {});
+const useToast = () => React.useContext(ToastContext);
+
+// ─── Tab Bar ─────────────────────────────────────────────────────────────────
+const TABS = [
+  {key:'dashboard', icon:'⊞', label:'Accueil'},
+  {key:'commandes', icon:'◧', label:'Commandes', badge:3},
+  {key:'pointage',  icon:'◷', label:'Pointage'},
+  {key:'stock',     icon:'◫', label:'Stock'},
+  {key:'plus',      icon:'☰', label:'Plus'},
+];
+const TabBar = ({active}) => {
+  const {navigate} = useRouter();
+  return (
+    <div style={{background:'rgba(255,255,255,0.95)', borderTop:`1px solid ${C.border}`, display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'6px 0 22px', flexShrink:0, backdropFilter:'blur(20px)'}}>
+      {TABS.map(t => (
+        <div key={t.key} className="tap" onClick={()=>navigate(t.key,'tab')} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:3, padding:'4px 0', position:'relative'}}>
+          <div style={{position:'relative'}}>
+            <span style={{fontSize:22, opacity:t.key===active?1:0.38, color:t.key===active?C.primary:C.text}}>{t.icon}</span>
+            {t.badge && t.key!==active && <div style={{position:'absolute', top:-2, right:-7, background:'#E04040', color:'#fff', borderRadius:8, fontSize:9, fontWeight:700, padding:'1px 4px', minWidth:14, textAlign:'center', border:'1.5px solid #fff'}}>{t.badge}</div>}
+          </div>
+          <Txt s={10} c={t.key===active?C.primary:C.textLight} w={t.key===active?600:400}>{t.label}</Txt>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── Header ──────────────────────────────────────────────────────────────────
+const Header = ({title, back, right, big=false}) => {
+  const {goBack} = useRouter();
+  return (
+    <div style={{background:C.white, borderBottom:`1px solid ${C.border}`, padding: big?'8px 16px 14px':'11px 16px', display:'flex', alignItems:'center', gap:10, flexShrink:0}}>
+      {back && <div className="tap" onClick={goBack} style={{color:C.primary, fontSize:14, fontWeight:500, marginRight:2}}>‹ {back}</div>}
+      <div style={{flex:1}}>{big ? <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:26, color:C.text, lineHeight:1}}>{title}</div> : <Txt s={16} w={600}>{title}</Txt>}</div>
+      {right}
+    </div>
+  );
+};
+
+// ─── Screens ─────────────────────────────────────────────────────────────────
+
+// DASHBOARD V2
+const Dashboard = () => {
+  const {navigate} = useRouter();
+  const toast = useToast();
+  const [doneItems, setDoneItems] = useState([false,false,true]);
+  const toggle = i => setDoneItems(d => d.map((v,j)=>j===i?!v:v));
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Aujourd'hui" big right={
+        <div style={{width:36, height:36, borderRadius:18, background:C.green, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <Txt s={14} w={700} c={C.dark}>P</Txt>
+        </div>
+      } />
+      <div className="scroll" style={{flex:1, padding:'14px 16px'}}>
+
+        {/* Grande carte pointage */}
+        <Card style={{padding:'18px', marginBottom:14, background:C.dark, cursor:'pointer'}} onClick={()=>navigate('pointage')}>
+          <Txt s={11} c='rgba(255,255,255,0.6)' style={{display:'block'}}>POINTAGE</Txt>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:6}}>
+            <div>
+              <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:38, lineHeight:1, color:'#fff'}}>14:32</div>
+              <Txt s={12} c='rgba(255,255,255,0.65)' style={{display:'block', marginTop:4}}>Pas encore pointé aujourd'hui</Txt>
+            </div>
+          </div>
+          <div className="tap" style={{marginTop:14, background:'rgba(255,255,255,0.95)', borderRadius:10, padding:'11px 14px', display:'flex', alignItems:'center', gap:10}}
+            onClick={e=>{e.stopPropagation(); navigate('pointage'); toast('⏱ Ouverture pointage…');}}>
+            <span style={{fontSize:18}}>⏱</span>
+            <Txt s={14} w={600} c={C.text} style={{flex:1}}>Pointer mon arrivée</Txt>
+            <Txt s={18} c={C.primary}>›</Txt>
+          </div>
+        </Card>
+
+        {/* À faire */}
+        <Card style={{padding:'14px', marginBottom:14}}>
+          <div style={{display:'flex', justifyContent:'space-between', marginBottom:10}}>
+            <Txt s={14} w={600}>3 choses à faire</Txt>
+            <Txt s={11} c={C.textLight}>aujourd'hui</Txt>
+          </div>
+          {[
+            {l:'Préparer cmd Café du Nord', sub:'Citron 50cl ×60', screen:'commande-detail'},
+            {l:'Vérifier stock capsules', sub:'12 restantes', screen:'inventaire'},
+            {l:'Pointer Marie D.', sub:'arrivée 08:00', screen:'pointage'},
+          ].map(({l,sub,screen},i)=>(
+            <div key={l} className="tap" onClick={()=>{ toggle(i); }} style={{display:'flex', gap:10, padding:'9px 0', borderBottom:i<2?`1px solid ${C.borderLight}`:'none', alignItems:'center'}}>
+              <div style={{width:22, height:22, borderRadius:11, border:`2px solid ${doneItems[i]?C.primary:C.border}`, background:doneItems[i]?C.primary:'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+                {doneItems[i] && <Txt s={12} c='#fff' w={700}>✓</Txt>}
+              </div>
+              <div className="tap" style={{flex:1}} onClick={e=>{e.stopPropagation(); navigate(screen);}}>
+                <Txt s={13} style={{textDecoration:doneItems[i]?'line-through':'none', color:doneItems[i]?C.textLighter:C.text}}>{l}</Txt>
+                <div><Txt s={10} c={C.textLight}>{sub}</Txt></div>
+              </div>
+              <Txt s={16} c={C.textLighter}>›</Txt>
+            </div>
+          ))}
+        </Card>
+
+        {/* Stats compactes */}
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14}}>
+          <Card style={{padding:'13px'}} onClick={()=>navigate('stock')}>
+            <Txt s={11} c={C.textLight} style={{display:'block'}}>Stock total</Txt>
+            <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:26, color:C.primary}}>1 240</div>
+            <Txt s={10} c={C.textLight}>↑ +48 cette semaine</Txt>
+          </Card>
+          <Card className="tap" style={{padding:'13px'}} onClick={()=>navigate('commandes')}>
+            <Txt s={11} c={C.textLight} style={{display:'block'}}>Commandes</Txt>
+            <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:26, color:C.primary}}>3</div>
+            <Txt s={10} c={C.yellowDark} w={600}>2 urgentes</Txt>
+          </Card>
+        </div>
+
+        {/* Alerte */}
+        <Card style={{padding:'12px 14px', background:C.yellow+'55', border:`1px solid ${C.yellowDark}44`}} onClick={()=>navigate('inventaire')}>
+          <div style={{display:'flex', alignItems:'center', gap:10}}>
+            <span style={{fontSize:16}}>⚠</span>
+            <div style={{flex:1}}>
+              <Txt s={12} w={600}>Capsules 25cl — stock bas</Txt>
+              <div><Txt s={10} c={C.textLight}>12 restantes (seuil: 50) · toucher pour voir</Txt></div>
+            </div>
+            <Txt s={16} c={C.textLighter}>›</Txt>
+          </div>
+        </Card>
+      </div>
+      <TabBar active="dashboard" />
+    </div>
+  );
+};
+
+// COMMANDES (calendrier)
+const ORDERS = [
+  {id:'042', client:'Café du Nord',    loc:'Lausanne', art:'Citron 50cl ×60',           date:'08.05', montant:'480.–', status:'en attente'},
+  {id:'041', client:'Migros Nyon',     loc:'Nyon',     art:'Pêche 25cl ×120, Nature 1L ×20', date:'09.05', montant:'960.–', status:'produite'},
+  {id:'040', client:'Boutique Thé',    loc:'Morges',   art:'Fraise 25cl ×48',           date:'12.05', montant:'288.–', status:'en attente'},
+  {id:'039', client:'Restaurant Lac',  loc:'Vevey',    art:'Nature 50cl ×30',           date:'01.05', montant:'180.–', status:'livrée'},
+];
+const Commandes = () => {
+  const {navigate} = useRouter();
+  const [selDay, setSelDay] = useState(8);
+  const days = [{d:6,l:'M'},{d:7,l:'M'},{d:8,l:'J',orders:[ORDERS[0]]},{d:9,l:'V',orders:[ORDERS[1]]},{d:10,l:'S'},{d:11,l:'D'},{d:12,l:'L',orders:[ORDERS[2]]}];
+
+  const visible = selDay ? ORDERS.filter(o=>o.date===`0${selDay}.05`||o.date===`${selDay}.05`) : ORDERS.filter(o=>o.status!=='livrée');
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Commandes" big right={
+        <Btn primary s={13} h={32} onClick={()=>navigate('commande-create')}>+ Créer</Btn>
+      }/>
+      {/* Mini-calendrier */}
+      <div style={{background:C.white, borderBottom:`1px solid ${C.border}`, padding:'10px 16px'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+          <Txt s={13} w={600}>Mai 2026</Txt>
+          <div style={{display:'flex', gap:2}}>
+            <Btn ghost h={26} s={12} style={{padding:'0 10px'}}>‹</Btn>
+            <Btn ghost h={26} s={12} style={{padding:'0 10px'}}>›</Btn>
+          </div>
+        </div>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:3}}>
+          {days.map(({d,l,orders})=>(
+            <div key={d} className="tap" onClick={()=>setSelDay(d===selDay?null:d)} style={{textAlign:'center', padding:'6px 2px', borderRadius:10, background:d===selDay?C.primary:'transparent'}}>
+              <Txt s={9} c={d===selDay?'rgba(255,255,255,0.7)':C.textLighter}>{l}</Txt>
+              <div style={{fontSize:16, fontWeight:600, color:d===selDay?'#fff':C.text, marginTop:2}}>{d}</div>
+              {orders?.length && <div style={{width:5, height:5, borderRadius:3, background:d===selDay?'#fff':C.yellowDark, margin:'3px auto 0'}}/>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        {/* Filtre pills */}
+        <div style={{display:'flex', gap:6, marginBottom:12, overflowX:'auto'}}>
+          {['En attente','Produite','Livrée'].map(s=>(
+            <Pill key={s} bg={statusColor(s.toLowerCase())}>{s}</Pill>
+          ))}
+        </div>
+        {visible.length===0 && <Txt s={13} c={C.textLight}>Aucune commande ce jour-là.</Txt>}
+        {visible.map(o=>(
+          <Card key={o.id} className="tap" style={{padding:'13px', marginBottom:8, borderLeft:`4px solid ${statusColor(o.status)}`}} onClick={()=>navigate('commande-detail',o.id)}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4}}>
+              <div>
+                <Txt s={10} c={C.textLighter}>#{o.id}</Txt>
+                <Txt s={15} w={600} style={{display:'block'}}>{o.client}</Txt>
+              </div>
+              <Pill bg={statusColor(o.status)}>{o.status}</Pill>
+            </div>
+            <Txt s={11} c={C.textLight}>{o.art}</Txt>
+            <div style={{display:'flex', justifyContent:'space-between', marginTop:9, paddingTop:9, borderTop:`1px solid ${C.borderLight}`}}>
+              <Txt s={11} c={C.textLight}>livraison {o.date}</Txt>
+              <Txt s={13} w={700} c={C.primary}>CHF {o.montant}</Txt>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <TabBar active="commandes"/>
+    </div>
+  );
+};
+
+// COMMANDE DETAIL
+const CommandeDetail = ({orderId}) => {
+  const {navigate, goBack} = useRouter();
+  const toast = useToast();
+  const o = ORDERS.find(x=>x.id===orderId) || ORDERS[0];
+  const steps = [{l:'Créée',done:true},{l:'Planif.',current:true},{l:'Produite',done:false},{l:'BL',done:false},{l:'Livrée',done:false}];
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title={`#${o.id} ${o.client}`} back="Retour" right={<Txt s={14} c={C.textLighter}>⋯</Txt>} />
+      <div className="scroll" style={{flex:1}}>
+        {/* Hero */}
+        <div style={{background:C.white, padding:'14px 16px', borderBottom:`1px solid ${C.border}`}}>
+          <Pill bg={statusColor(o.status)}>{o.status}</Pill>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:28, color:C.text, marginTop:8, marginBottom:2}}>CHF {o.montant}</div>
+          <Txt s={12} c={C.textLight}>Livraison {o.date} · {o.loc}</Txt>
+        </div>
+        {/* Step tracker */}
+        <div style={{background:C.white, padding:'14px 16px', borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex', alignItems:'center'}}>
+            {steps.map((s,i,arr)=>(
+              <React.Fragment key={s.l}>
+                <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:3}}>
+                  <div style={{width:24, height:24, borderRadius:12, background:s.done?C.greenDark:s.current?C.yellow:'#EDEAE3', border:s.current?`2px solid ${C.primary}`:'none', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                    <Txt s={10} w={700} c={s.done?'#fff':C.text}>{s.done?'✓':i+1}</Txt>
+                  </div>
+                  <Txt s={9} w={s.current?600:400} c={s.current?C.primary:C.textLighter}>{s.l}</Txt>
+                </div>
+                {i<arr.length-1 && <div style={{flex:1, height:2, background:s.done?C.greenDark:'#EDEAE3', marginTop:-14}}/>}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        {/* Prochaine action */}
+        <div style={{padding:'14px 16px'}}>
+          <Card style={{padding:'14px', background:C.yellow+'60', marginBottom:12}}>
+            <Txt s={11} w={600} style={{display:'block', marginBottom:4}}>Étape 2 — Planification</Txt>
+            <Txt s={12} c={C.textLight} style={{display:'block', marginBottom:12}}>Cette commande n'est pas encore planifiée en production.</Txt>
+            <Btn primary w="100%" h={42} onClick={()=>{ navigate('production'); toast('✓ Planificateur ouvert'); }}>→ Planifier en production</Btn>
+          </Card>
+          {/* Articles */}
+          <Txt s={11} c={C.textLighter} w={600} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Articles</Txt>
+          <Card style={{padding:'12px', marginBottom:12}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0'}}>
+              <Txt s={13}>{o.art}</Txt>
+              <Txt s={14} w={700} c={C.primary}>CHF {o.montant}</Txt>
+            </div>
+          </Card>
+          {/* Client */}
+          <Txt s={11} c={C.textLighter} w={600} style={{textTransform:'uppercase', letterSpacing:0.5, display:'block', marginBottom:8}}>Client</Txt>
+          <Card style={{padding:'14px', marginBottom:12}}>
+            <Txt s={14} w={600} style={{display:'block'}}>{o.client}</Txt>
+            <Txt s={11} c={C.textLight} style={{display:'block', marginBottom:10}}>{o.loc}</Txt>
+            <div style={{display:'flex', gap:8}}>
+              <Btn ghost w="50%" h={36} onClick={()=>toast('📞 Appel simulé')}>📞 Appeler</Btn>
+              <Btn ghost w="50%" h={36} onClick={()=>toast('📍 Maps simulé')}>📍 Itinéraire</Btn>
+            </div>
+          </Card>
+          {/* Actions */}
+          <div style={{display:'flex', gap:8}}>
+            <Btn ghost w="50%" h={36} onClick={()=>toast('✓ Commande dupliquée')}>📋 Dupliquer</Btn>
+            <Btn danger w="50%" h={36} onClick={()=>{ goBack(); toast('✕ Commande annulée'); }}>Annuler</Btn>
+          </div>
+        </div>
+      </div>
+      <TabBar active="commandes"/>
+    </div>
+  );
+};
+
+// CRÉER COMMANDE
+const CreateCommande = () => {
+  const {goBack} = useRouter();
+  const toast = useToast();
+  const [selClient, setSelClient] = useState('');
+  const [qty, setQty] = useState({});
+  const aromes = ['Citron','Pêche','Fraise','Nature'];
+  const formats = ['25cl','50cl','1L'];
+  const getQty = (a,f) => qty[a+f]||0;
+  const setQ = (a,f,v) => setQty(q=>({...q,[a+f]:Math.max(0,v)}));
+  const total = Object.values(qty).reduce((s,v)=>s+v,0);
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Nouvelle commande" back="Annuler"
+        right={<div className="tap" onClick={()=>{ goBack(); toast('✓ Commande créée'); }} style={{color:C.primary, fontSize:14, fontWeight:600}}>Créer</div>}
+      />
+      <div className="scroll" style={{flex:1, padding:'14px 16px'}}>
+        {/* Client */}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:0.5}}>Client</Txt>
+        <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:14}}>
+          {['Café du Nord','Migros Nyon','Boutique Thé','Restaurant Lac'].map(c=>(
+            <div key={c} className="tap" onClick={()=>setSelClient(c)} style={{padding:'7px 12px', borderRadius:10, background:selClient===c?C.primary:'#fff', border:`1.5px solid ${selClient===c?C.primary:C.border}`}}>
+              <Txt s={12} w={600} c={selClient===c?'#fff':C.text}>{c}</Txt>
+            </div>
+          ))}
+        </div>
+        {/* Date */}
+        <Input label="Date de livraison" placeholder="jj.mm.aaaa" value="08.05.2026" />
+        <div style={{height:14}}/>
+        {/* Matrice articles */}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Articles</Txt>
+        <Card style={{padding:'10px', marginBottom:14}}>
+          {/* Header */}
+          <div style={{display:'grid', gridTemplateColumns:'80px repeat(3,1fr)', gap:3, marginBottom:6}}>
+            {['', ...formats].map(h=>(
+              <div key={h} style={{textAlign:'center'}}><Txt s={11} w={600} c={C.textLighter}>{h}</Txt></div>
+            ))}
+          </div>
+          {aromes.map(a=>(
+            <div key={a} style={{display:'grid', gridTemplateColumns:'80px repeat(3,1fr)', gap:3, marginBottom:4}}>
+              <div style={{display:'flex', alignItems:'center'}}><Txt s={12} w={600}>{a}</Txt></div>
+              {formats.map(f=>(
+                <div key={f} className="tap" onClick={()=>setQ(a,f,getQty(a,f)+12)}
+                  style={{height:42, borderRadius:9, background:getQty(a,f)>0?C.green+'80':'#fff', border:`1.5px solid ${getQty(a,f)>0?C.greenDark:C.border}`, display:'flex', alignItems:'center', justifyContent:'center'}}>
+                  {getQty(a,f)>0
+                    ? <Txt s={13} w={700} c={C.dark}>{getQty(a,f)}</Txt>
+                    : <Txt s={16} c={C.textLighter}>+</Txt>
+                  }
+                </div>
+              ))}
+            </div>
+          ))}
+          <Txt s={10} c={C.textLighter} style={{display:'block', marginTop:4}}>Toucher une cellule pour ajouter par 12</Txt>
+        </Card>
+        {/* Total */}
+        {total>0 && (
+          <Card style={{padding:'14px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div>
+              <Txt s={13} w={600} style={{display:'block'}}>{total} bouteilles</Txt>
+              <Txt s={11} c={C.textLight}>estimé selon tarif</Txt>
+            </div>
+            <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:24, color:C.primary}}>CHF {total*8}.–</div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// POINTAGE
+const EMPLOYEES = ['Philippe','Marie D.','Thomas L.','Pierre M.'];
+const Pointage = () => {
+  const toast = useToast();
+  const [sel, setSel] = useState(0);
+  const [entries, setEntries] = useState([
+    {emp:'Marie D.', in:'08:00', out:'16:30', dur:'8h00'},
+    {emp:'Thomas L.', in:'09:00', out:null, dur:null},
+  ]);
+  const [arrive, setArrive] = useState('');
+  const [depart, setDepart] = useState('');
+  const [pause, setPause] = useState('');
+
+  const pointer = (type) => {
+    const now = '14:32';
+    if(type==='in') {
+      toast(`⏱ Arrivée pointée — ${EMPLOYEES[sel]} ${now}`);
+      setArrive(now);
+    } else {
+      toast(`⏹ Départ pointé — ${EMPLOYEES[sel]} ${now}`);
+      setDepart(now);
+    }
+  };
+  const save = () => {
+    if(!arrive) { toast('⚠ Heure d\'arrivée manquante'); return; }
+    const d = arrive && depart ? `${Math.floor((parseInt(depart)-parseInt(arrive)))}h00` : '—';
+    setEntries(e=>[...e, {emp:EMPLOYEES[sel], in:arrive, out:depart||'—', dur:d}]);
+    setArrive(''); setDepart(''); setPause('');
+    toast(`✓ Pointage enregistré — ${EMPLOYEES[sel]}`);
+  };
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Pointage" big />
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        {/* Horloge */}
+        <Card style={{padding:'22px 16px', textAlign:'center', marginBottom:14, background:`linear-gradient(135deg,${C.primary},${C.dark})`}}>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:52, letterSpacing:2, color:'#fff', lineHeight:1}}>14:32</div>
+          <Txt s={12} c='rgba(255,255,255,0.7)' style={{display:'block', marginTop:6}}>Jeudi 8 mai 2026</Txt>
+          <div style={{display:'flex', gap:10, marginTop:16, justifyContent:'center'}}>
+            <Btn h={40} style={{background:'rgba(255,255,255,0.9)', flex:1}} onClick={()=>pointer('in')}>⏱ Arrivée</Btn>
+            <Btn h={40} danger style={{flex:1}} onClick={()=>pointer('out')}>⏹ Départ</Btn>
+          </div>
+        </Card>
+
+        {/* Qui pointe */}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Qui pointe ?</Txt>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14}}>
+          {EMPLOYEES.map((n,i)=>{
+            const live = entries.find(e=>e.emp===n&&!e.out);
+            return (
+              <Card key={n} className="tap" onClick={()=>setSel(i)} style={{padding:'12px', border:sel===i?`2px solid ${C.primary}`:`1px solid ${C.border}`, background:sel===i?C.green+'30':'#fff'}}>
+                <div style={{display:'flex', alignItems:'center', gap:8}}>
+                  <div style={{width:32, height:32, borderRadius:16, background:C.green, display:'flex', alignItems:'center', justifyContent:'center', position:'relative'}}>
+                    <Txt s={12} w={700}>{n[0]}</Txt>
+                    {live && <div style={{position:'absolute', top:0, right:0, width:9, height:9, borderRadius:5, background:'#3CA350', border:'1.5px solid #fff'}}/>}
+                  </div>
+                  <div>
+                    <Txt s={12} w={600}>{n}</Txt>
+                    {live && <div><Txt s={9} c={C.textLight}>{live.in} → live</Txt></div>}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Saisie manuelle */}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Saisie manuelle</Txt>
+        <Card style={{padding:'14px', marginBottom:14}}>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:10}}>
+            <Input label="Arrivée" placeholder="08:00" value={arrive} />
+            <Input label="Départ" placeholder="16:30" value={depart} />
+            <Input label="Pause" placeholder="30 min" value={pause} />
+          </div>
+          <Btn primary w="100%" h={40} onClick={save}>Enregistrer</Btn>
+        </Card>
+
+        {/* Historique du jour */}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Aujourd'hui</Txt>
+        <Card style={{padding:'4px 12px'}}>
+          {entries.map((e,i)=>(
+            <div key={i} style={{display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:i<entries.length-1?`1px solid ${C.borderLight}`:'none'}}>
+              <div style={{width:30, height:30, borderRadius:15, background:!e.out?C.green:C.green+'60', display:'flex', alignItems:'center', justifyContent:'center', position:'relative'}}>
+                <Txt s={11} w={700}>{e.emp[0]}</Txt>
+                {!e.out && <div style={{position:'absolute', top:0, right:0, width:8, height:8, borderRadius:4, background:'#3CA350', border:'1.5px solid #fff'}}/>}
+              </div>
+              <div style={{flex:1}}>
+                <Txt s={13} w={600}>{e.emp}</Txt>
+                <div><Txt s={10} c={C.textLight}>{e.in} → {e.out||'…'}</Txt></div>
+              </div>
+              <Txt s={12} w={700} c={!e.out?C.yellowDark:C.primary}>{e.dur||'live'}</Txt>
+            </div>
+          ))}
+        </Card>
+      </div>
+      <TabBar active="pointage"/>
+    </div>
+  );
+};
+
+// STOCK
+const Stock = () => {
+  const {navigate} = useRouter();
+  const aromes = [['Citron','#c8e4a0',340],['Pêche','#f5d4a0',220],['Fraise','#f5b8b8',180],['Nature','#d4d4c8',500]];
+  const lots = [
+    {a:'Citron',f:'50cl',q:120,d:'01.08.26',s:'ok'},
+    {a:'Pêche',f:'50cl',q:60,d:'15.06.26',s:'bientôt'},
+    {a:'Nature',f:'1L',q:20,d:'10.04.26',s:'expiré'},
+  ];
+  const toast = useToast();
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Stock" big right={<Btn primary h={32} s={13} onClick={()=>toast('+ Nouveau lot')}>+ Lot</Btn>}/>
+      <div style={{padding:'10px 16px', background:C.white, borderBottom:`1px solid ${C.border}`}}>
+        <div style={{height:36, border:`1.5px solid ${C.border}`, borderRadius:10, background:C.bg, display:'flex', alignItems:'center', padding:'0 12px', gap:8}}>
+          <span style={{opacity:0.4}}>🔍</span>
+          <Txt s={13} c={C.textLighter}>Rechercher un lot…</Txt>
+        </div>
+      </div>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16}}>
+          {aromes.map(([a,c,v])=>(
+            <Card key={a} className="tap" style={{padding:'13px'}} onClick={()=>toast(`${a} — ${v} bouteilles`)}>
+              <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:4}}>
+                <div style={{width:10,height:10,borderRadius:5,background:c}}/>
+                <Txt s={12} w={600}>{a}</Txt>
+              </div>
+              <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:26, color:C.primary}}>{v}</div>
+              <Txt s={10} c={C.textLight}>btl vendables</Txt>
+            </Card>
+          ))}
+        </div>
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Lots récents</Txt>
+        {lots.map((l,i)=>{
+          const sc = l.s==='ok'?C.green:l.s==='bientôt'?C.yellow:C.red;
+          return (
+            <Card key={i} className="tap" style={{padding:'12px', marginBottom:6, borderLeft:`4px solid ${sc}`}} onClick={()=>toast(`Lot ${l.a} ${l.f}`)}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <div>
+                  <Txt s={14} w={600}>{l.a} {l.f}</Txt>
+                  <div><Txt s={11} c={C.textLight}>{l.q} bouteilles · DLC {l.d}</Txt></div>
+                </div>
+                <Pill bg={sc}>{l.s}</Pill>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      <TabBar active="stock"/>
+    </div>
+  );
+};
+
+// INVENTAIRE
+const Inventaire = () => {
+  const toast = useToast();
+  const [items, setItems] = useState([
+    {n:'Thé noir',q:2000,unit:'g',seuil:500,ok:true},
+    {n:'Sucre de canne',q:5000,unit:'g',seuil:1000,ok:true},
+    {n:'Arôme citron',q:80,unit:'mL',seuil:200,ok:false},
+    {n:'Capsules 25cl',q:12,unit:'pcs',seuil:50,ok:false},
+    {n:'Capsules 50cl',q:250,unit:'pcs',seuil:100,ok:true},
+    {n:'Étiquettes',q:320,unit:'pcs',seuil:200,ok:true},
+  ]);
+  const adj = (i, delta) => {
+    setItems(its => its.map((it,j) => j===i ? {...it, q:Math.max(0,it.q+delta), ok:(it.q+delta)>it.seuil} : it));
+    toast(delta>0?`+ ajouté`:`− retiré`);
+  };
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Inventaire" big right={<Btn primary h={32} s={13} onClick={()=>toast('+ Ajouter article')}>+</Btn>}/>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        <Card style={{padding:'10px 14px', marginBottom:12, background:C.yellow+'60'}}>
+          <div style={{display:'flex', alignItems:'center', gap:8}}>
+            <span>⚠</span>
+            <Txt s={12} w={600}>{items.filter(i=>!i.ok).length} articles sous le seuil</Txt>
+          </div>
+        </Card>
+        {items.map((it,i)=>(
+          <Card key={i} style={{padding:'12px', marginBottom:6}}>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+              <div style={{width:7,height:7,borderRadius:4,background:it.ok?C.greenDark:C.redDark,flexShrink:0}}/>
+              <div style={{flex:1}}>
+                <Txt s={13} w={it.ok?400:600}>{it.n}</Txt>
+                <div><Txt s={11} c={it.ok?C.textLight:C.redDark}>{it.q} {it.unit}{!it.ok?' — stock bas':''}</Txt></div>
+              </div>
+              <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                <div className="tap" onClick={()=>adj(i,-1)} style={{width:34,height:34,borderRadius:9,background:'#EDEAE3',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:700,color:C.text}}>−</div>
+                <div className="tap" onClick={()=>adj(i,+1)} style={{width:34,height:34,borderRadius:9,background:C.primary,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:700,color:'#fff'}}>+</div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <TabBar active="stock"/>
+    </div>
+  );
+};
+
+// PRODUCTION
+const Production = () => {
+  const toast = useToast();
+  const [done, setDone] = useState({});
+  const cuves = [
+    {a:'Citron', c:'#c8e4a0', lots:[{l:25,p:100},{l:15,p:60}]},
+    {a:'Pêche',  c:'#f5d4a0', lots:[{l:20,p:80}]},
+  ];
+  const ings = [
+    {n:'Thé noir',need:'500g',have:'2kg',ok:true},
+    {n:'Sucre',need:'2kg',have:'5kg',ok:true},
+    {n:'Arôme citron',need:'100mL',have:'80mL',ok:false},
+    {n:'Capsules 50cl',need:'180',have:'250',ok:true},
+  ];
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Production" big right={<Txt s={13} c={C.primary} w={600}>Calculer</Txt>}/>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        <Card style={{padding:'12px', marginBottom:14, display:'flex', gap:10, alignItems:'center'}}>
+          {[['Du','07.05'],['→',''],['Au','14.05']].map(([l,v],i)=>
+            l==='→' ? <Txt key={i} s={18} c={C.textLighter}>→</Txt> :
+            <div key={i} style={{flex:1}}>
+              <Txt s={10} c={C.textLighter} style={{display:'block'}}>{l}</Txt>
+              <Txt s={14} w={600}>{v}</Txt>
+            </div>
+          )}
+        </Card>
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Cuves</Txt>
+        {cuves.map(({a,c,lots})=>(
+          <Card key={a} style={{padding:'12px', marginBottom:8}}>
+            <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:8}}>
+              <div style={{width:10,height:10,borderRadius:5,background:c}}/>
+              <Txt s={13} w={600}>{a}</Txt>
+              <Txt s={11} c={C.textLight} style={{marginLeft:'auto'}}>{lots.reduce((s,l)=>s+l.l,0)}L total</Txt>
+            </div>
+            {lots.map((cu,i)=>{
+              const key = a+i;
+              return (
+                <div key={i} style={{display:'flex', alignItems:'center', gap:8, padding:'6px 0'}}>
+                  <Txt s={11} c={C.textLight} style={{minWidth:52}}>Cuve {i+1}</Txt>
+                  <div style={{flex:1, height:8, background:'#EDEAE3', borderRadius:4}}>
+                    <div style={{width:`${cu.p}%`, height:'100%', background:done[key]?C.greenDark:C.light, borderRadius:4}}/>
+                  </div>
+                  <Txt s={12} w={700} c={C.primary} style={{minWidth:32, textAlign:'right'}}>{cu.l}L</Txt>
+                  <Btn primary={!done[key]} h={30} s={12} style={{background:done[key]?C.greenDark:C.primary}} onClick={()=>{ setDone(d=>({...d,[key]:true})); toast(`✓ Cuve ${i+1} ${a} produite`); }}>
+                    {done[key]?'✓ OK':'Prod.'}
+                  </Btn>
+                </div>
+              );
+            })}
+          </Card>
+        ))}
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, marginTop:14, textTransform:'uppercase', letterSpacing:0.5}}>Ingrédients</Txt>
+        <Card style={{padding:'4px 12px'}}>
+          {ings.map(i=>(
+            <div key={i.n} style={{display:'flex', alignItems:'center', gap:8, padding:'9px 0', borderBottom:`1px solid ${C.borderLight}`}}>
+              <Txt s={14}>{i.ok?'✓':'⚠'}</Txt>
+              <Txt s={12} style={{flex:1}}>{i.n}</Txt>
+              <Txt s={11} c={C.textLight}>{i.need}</Txt>
+              <Txt s={12} w={700} c={i.ok?C.primary:C.redDark}>{i.have}</Txt>
+            </div>
+          ))}
+        </Card>
+      </div>
+      <TabBar active="stock"/>
+    </div>
+  );
+};
+
+// COMPTABILITÉ
+const Compta = () => {
+  const {goBack} = useRouter();
+  const toast = useToast();
+  const factures = [
+    {n:'F-042',c:'Café du Nord',m:'480.–',s:'envoyée'},
+    {n:'F-041',c:'Migros Nyon',m:'960.–',s:'payée'},
+    {n:'F-040',c:'Boutique Thé',m:'288.–',s:'en retard'},
+  ];
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Comptabilité" back="Plus" right={<Btn primary h={30} s={12} onClick={()=>toast('+ Nouvelle facture')}>+ Facture</Btn>}/>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        <Card style={{padding:'18px', marginBottom:14, background:`linear-gradient(135deg,${C.primary},${C.dark})`}}>
+          <Txt s={11} c='rgba(255,255,255,0.65)' style={{display:'block'}}>Revenus — mai 2026</Txt>
+          <div style={{fontFamily:'Outfit', fontWeight:700, fontSize:34, color:'#fff', marginTop:4}}>CHF 4 280.–</div>
+          <div style={{display:'flex', gap:16, marginTop:12}}>
+            {[['Encaissé','2 940.–'],['En attente','1 340.–'],['Marge','62%']].map(([l,v])=>(
+              <div key={l}><Txt s={9} c='rgba(255,255,255,0.6)' style={{display:'block'}}>{l}</Txt><Txt s={14} w={600} c='#fff'>{v}</Txt></div>
+            ))}
+          </div>
+        </Card>
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Factures</Txt>
+        {factures.map(f=>(
+          <Card key={f.n} className="tap" style={{padding:'12px', marginBottom:6}} onClick={()=>toast(`PDF ${f.n}`)}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+              <div>
+                <Txt s={10} c={C.textLighter}>{f.n}</Txt>
+                <Txt s={14} w={600} style={{display:'block'}}>{f.c}</Txt>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <Txt s={14} w={700} c={C.primary} style={{display:'block'}}>CHF {f.m}</Txt>
+                <Pill bg={statusColor(f.s)} s={10}>{f.s}</Pill>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <TabBar active="plus"/>
+    </div>
+  );
+};
+
+// PLUS
+const Plus = () => {
+  const {navigate} = useRouter();
+  const toast = useToast();
+  return (
+    <div style={{display:'flex', flexDirection:'column', height:'100%', background:C.bg}}>
+      <Header title="Plus" big/>
+      <div className="scroll" style={{flex:1, padding:'12px 16px'}}>
+        <Card style={{padding:'14px', marginBottom:14, display:'flex', alignItems:'center', gap:12}}>
+          <div style={{width:46,height:46,borderRadius:23,background:C.green,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Txt s={18} w={700}>P</Txt>
+          </div>
+          <div style={{flex:1}}>
+            <Txt s={14} w={600} style={{display:'block'}}>Philippe Ong</Txt>
+            <Txt s={11} c={C.textLight}>Patron · admin</Txt>
+          </div>
+          <Txt s={16} c={C.textLighter}>›</Txt>
+        </Card>
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Modules</Txt>
+        <Card style={{padding:'0 0', marginBottom:14, overflow:'hidden'}}>
+          {[
+            {ic:'💰', n:'Comptabilité', sub:'3 factures actives', s:'compta', warn:'red'},
+            {ic:'⚙',  n:'Production',  sub:'7 → 14 mai', s:'production'},
+            {ic:'📋', n:'Inventaire',   sub:'2 alertes stock', s:'inventaire', warn:'yellow'},
+            {ic:'🚚', n:'Livraisons',   sub:'1 demain', s:'commandes'},
+          ].map(({ic,n,sub,s,warn},i,arr)=>(
+            <div key={n} className="tap" onClick={()=>navigate(s)} style={{display:'flex', alignItems:'center', gap:12, padding:'14px', borderBottom:i<arr.length-1?`1px solid ${C.borderLight}`:'none'}}>
+              <span style={{fontSize:20, width:28}}>{ic}</span>
+              <div style={{flex:1}}>
+                <Txt s={13} w={600}>{n}</Txt>
+                <div><Txt s={11} c={warn==='red'?C.redDark:warn==='yellow'?C.yellowDark:C.textLight}>{sub}</Txt></div>
+              </div>
+              <Txt s={16} c={C.textLighter}>›</Txt>
+            </div>
+          ))}
+        </Card>
+        <Txt s={11} c={C.textLighter} w={600} style={{display:'block', marginBottom:8, textTransform:'uppercase', letterSpacing:0.5}}>Paramètres</Txt>
+        <Card style={{overflow:'hidden'}}>
+          {['👥 Employés','🍃 Arômes & recettes','📐 Formats','💾 Sauvegarde & sync','⚙ Préférences'].map((n,i,arr)=>(
+            <div key={n} className="tap" onClick={()=>toast(`${n}`)} style={{display:'flex', alignItems:'center', gap:12, padding:'13px 14px', borderBottom:i<arr.length-1?`1px solid ${C.borderLight}`:'none'}}>
+              <Txt s={13} style={{flex:1}}>{n}</Txt>
+              <Txt s={16} c={C.textLighter}>›</Txt>
+            </div>
+          ))}
+        </Card>
+      </div>
+      <TabBar active="plus"/>
+    </div>
+  );
+};
+
+// ─── Root app with router ─────────────────────────────────────────────────────
+const App = () => {
+  const [screen, setScreen] = useState('dashboard');
+  const [meta, setMeta] = useState(null); // orderId etc.
+  const [history, setHistory] = useState([]);
+  const [dir, setDir] = useState('forward');
+  const [toastMsg, setToastMsg] = useState(null);
+  const toastTimer = useRef(null);
+
+  const navigate = useCallback((s, m='forward') => {
+    setDir(m==='tab'?'forward':'forward');
+    setHistory(h=>[...h, {screen, meta}]);
+    if(typeof m==='string'&&m!=='tab'&&m!=='forward') { setMeta(m); } else { setMeta(null); }
+    setScreen(s);
+  },[screen, meta]);
+
+  const goBack = useCallback(() => {
+    if(!history.length) return;
+    const prev = history[history.length-1];
+    setDir('back');
+    setScreen(prev.screen);
+    setMeta(prev.meta);
+    setHistory(h=>h.slice(0,-1));
+  },[history]);
+
+  const toast = useCallback((msg) => {
+    setToastMsg(null);
+    clearTimeout(toastTimer.current);
+    setTimeout(()=>{
+      setToastMsg(msg);
+      toastTimer.current = setTimeout(()=>setToastMsg(null), 2000);
+    }, 20);
+  },[]);
+
+  const router = { navigate, goBack };
+
+  const renderScreen = () => {
+    switch(screen) {
+      case 'dashboard':       return <Dashboard/>;
+      case 'commandes':       return <Commandes/>;
+      case 'commande-detail': return <CommandeDetail orderId={meta||'042'}/>;
+      case 'commande-create': return <CreateCommande/>;
+      case 'pointage':        return <Pointage/>;
+      case 'stock':           return <Stock/>;
+      case 'inventaire':      return <Inventaire/>;
+      case 'production':      return <Production/>;
+      case 'compta':          return <Compta/>;
+      case 'plus':            return <Plus/>;
+      default:                return <Dashboard/>;
+    }
+  };
+
+  // Intercept commande-detail navigation with orderId
+  const origNavigate = navigate;
+  const patchedNavigate = (s, m) => {
+    if(s==='commande-detail' && typeof m==='string' && m!=='tab' && m!=='forward' && m!=='back') {
+      setDir('forward');
+      setHistory(h=>[...h, {screen, meta}]);
+      setMeta(m);
+      setScreen(s);
+    } else {
+      origNavigate(s, m);
+    }
+  };
+  const patchedRouter = { navigate: patchedNavigate, goBack };
+
+  return (
+    <RouterContext.Provider value={patchedRouter}>
+    <ToastContext.Provider value={toast}>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'center', width:'100%', height:'100%'}}>
+        {/* Label */}
+        <div style={{position:'absolute', top:20, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.5)', color:'#fff', borderRadius:20, padding:'5px 14px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', zIndex:10}}>
+          ThéCol — Prototype Mobile
+        </div>
+        <IOSDevice width={390} height={844}>
+          <div key={screen} className={dir==='back'?'screen-back':'screen-enter'} style={{height:'100%', display:'flex', flexDirection:'column'}}>
+            {renderScreen()}
+          </div>
+          {toastMsg && <div key={toastMsg+Date.now()} className="toast">{toastMsg}</div>}
+        </IOSDevice>
+        {/* Hint */}
+        <div style={{position:'absolute', bottom:24, left:'50%', transform:'translateX(-50%)', color:'rgba(0,0,0,0.3)', fontSize:11, whiteSpace:'nowrap'}}>
+          Cliquez pour naviguer · ‹ pour revenir en arrière
+        </div>
+      </div>
+    </ToastContext.Provider>
+    </RouterContext.Provider>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<div id="root"></div>
+</body>
+</html>
