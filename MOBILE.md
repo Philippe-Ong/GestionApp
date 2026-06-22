@@ -74,23 +74,32 @@ npm run sync
 ```
 Puis relance l'APK (ou Live Reload depuis Android Studio).
 
-## Polish iOS (branche `ios-version`)
+## Polish mobile — iOS + Android (branche `mobile`)
 
-La couche web est adaptée pour iOS (testable depuis Windows/Safari, build final sur Mac) :
+Un **seul code web** alimente `ios/` et `android/` via `npm run sync`. La couche web est adaptée
+pour les deux plateformes (testable depuis Windows/Chrome/Safari) :
 
-- **`index.html`** : `viewport-fit=cover` (active les safe-areas), meta Apple
-  (`apple-mobile-web-app-*`), `theme-color`.
+- **`index.html`** : `viewport-fit=cover` (active les safe-areas), `theme-color` (#5D7B3E),
+  `mobile-web-app-capable` (Android/PWA) + meta Apple (`apple-mobile-web-app-*`, iOS).
 - **`styles.css`** : safe-areas (`env(safe-area-inset-*)`) sur header, sidebar, bottom-nav et
-  modals plein écran ; `100dvh` en remplacement de `100vh` ; champs forcés à `16px` sur iOS
-  (`@supports (-webkit-touch-callout)`) pour empêcher le zoom au focus ; `overscroll-behavior: none`.
+  modals plein écran ; `100dvh` en remplacement de `100vh` ; `overscroll-behavior: none`.
+  Le zoom-au-focus est neutralisé **côté iOS uniquement** (champs forcés à `16px` via
+  `@supports (-webkit-touch-callout)`) — sans effet sur Android.
+- **Android natif** : couleurs de marque déjà alignées (`colorPrimary`/`colorPrimaryDark`,
+  splash, nom d'app) dans `android/app/src/main/res/values/`.
 
-### Étape suivante (optionnel, nécessite Mac + `npm install`)
+### Builder chaque plateforme
 
-Pour un contrôle natif fin de la status bar et du clavier :
+- **Android** (Windows OK) : installer **JDK 21 + Android Studio**, définir `JAVA_HOME` /
+  `ANDROID_HOME`, puis `npm run sync` et `cd android && .\gradlew.bat assembleDebug` → APK.
+- **iOS** (Mac requis) : `npm run sync` puis `npm run open:ios` → Product → Archive.
+
+### Étape suivante (optionnel) — plugins natifs Capacitor
+
+Pour un contrôle natif fin de la status bar et du clavier (iOS + Android) :
 
 ```
 npm i @capacitor/status-bar @capacitor/keyboard
 ```
 
-Puis init léger dans `app.js` (style/couleur de la status bar, resize au clavier). Non testable
-depuis Windows — à faire lors du build Mac.
+Puis init léger dans `app.js`. À tester lors des builds natifs.
