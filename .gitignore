@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Capacitor — sortie générée par `npm run sync` (à régénérer, ne pas committer)
+www/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/capacitor-cordova-ios-plugins/
+android/app/src/main/assets/
+android/app/src/main/res/xml/config.xml
+android/capacitor-cordova-android-plugins/
+
+# Outils locaux Claude Code
+.claude/settings.local.json
+.claude/launch.json
+
+# OS / éditeur
+.DS_Store
+Thumbs.db

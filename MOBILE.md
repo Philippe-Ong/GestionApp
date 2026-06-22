@@ -73,3 +73,24 @@ Puis dans Xcode : Product → Archive → Distribute App.
 npm run sync
 ```
 Puis relance l'APK (ou Live Reload depuis Android Studio).
+
+## Polish iOS (branche `ios-version`)
+
+La couche web est adaptée pour iOS (testable depuis Windows/Safari, build final sur Mac) :
+
+- **`index.html`** : `viewport-fit=cover` (active les safe-areas), meta Apple
+  (`apple-mobile-web-app-*`), `theme-color`.
+- **`styles.css`** : safe-areas (`env(safe-area-inset-*)`) sur header, sidebar, bottom-nav et
+  modals plein écran ; `100dvh` en remplacement de `100vh` ; champs forcés à `16px` sur iOS
+  (`@supports (-webkit-touch-callout)`) pour empêcher le zoom au focus ; `overscroll-behavior: none`.
+
+### Étape suivante (optionnel, nécessite Mac + `npm install`)
+
+Pour un contrôle natif fin de la status bar et du clavier :
+
+```
+npm i @capacitor/status-bar @capacitor/keyboard
+```
+
+Puis init léger dans `app.js` (style/couleur de la status bar, resize au clavier). Non testable
+depuis Windows — à faire lors du build Mac.
