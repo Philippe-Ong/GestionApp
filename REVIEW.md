@@ -87,12 +87,12 @@ Revue **en lecture seule** de `app.js` (6174 lignes), `index.html`, `styles.css`
 - [ ] `app.js:913` — `style="background: ${arome?.couleur}"` non échappé (les autres occurrences le sont : L993, L1019).
 - [ ] `app.js:205`, `app.js:758-765` — `renderDashboard` ne filtre pas les arômes/formats inactifs (`actif`) contrairement à `getActive`.
 - [ ] `app.js:3238` — bouton « Appeler » toujours vide : `saveClient` (L5932-5945) n'enregistre ni `email` ni `telephone` (attendus par SPEC.md L55-65). Idem `employe.tauxHoraire` (SPEC L19) et `pointage.notes` (SPEC L104) jamais renseignés.
-- [ ] Lots stockés par noms libres (`arome`/`format`) au lieu d'IDs (`aromeId`/`formatId`, SPEC L67-79) — fragile aux renommages.
+- [x] Lots stockés par noms libres (`arome`/`format`) au lieu d'IDs (`aromeId`/`formatId`, SPEC L67-79) — fragile aux renommages. *(implémenté non destructif : aromeId/formatId à l'écriture, fallback nom pour les lots existants)*
 - [ ] `styles.css:525` `#3498DB` ; L819/847/852/2337 `#3F6B2A` ×4 ; L2351 `#3CA350` ; L314/L2638 `#EDEAE3` ×2 — hex hors `:root` à extraire en variables.
-- [ ] `styles.css` — blocs `@media` éclatés (768px en deux endroits L1453-2058 et L2937+, bloc desktop après mobile L2115) — ordre fragile.
+- [x] `styles.css` — blocs `@media` éclatés (768px en deux endroits L1453-2058 et L2937+, bloc desktop après mobile L2115) — ordre fragile. *(traité v8.8 : aucune duplication restante, ordre vérifié fonctionnel)*
 - [ ] `index.html:115` — overlay modal avec `aria-hidden="true"` statique + `role="dialog"` dans le DOM initial ; contenu derrière la modale non `inert` quand elle est ouverte.
 - [ ] `index.html:36`, `app.js:661` — « Dashboard » ; `index.html:80` — « Sync » ; `app.js:1012/1016/1065` — badge « OK » ; `app.js:1210` etc. — « N/A » : textes UI non français (règle AGENTS.md).
-- [ ] `AGENTS.md:9` annonce v8.5 (stale vs v8.6) ; `CLAUDE.md` tailles obsolètes ; `styles.css?v=2.8` suit un compteur indépendant de la version app.
+- [x] `AGENTS.md:9` annonce v8.5 (stale vs v8.6) ; `CLAUDE.md` tailles obsolètes ; `styles.css?v=2.8` suit un compteur indépendant de la version app.
 
 ---
 

@@ -31,13 +31,13 @@ The entire app lives in four files at the root:
 | File | Role |
 |------|------|
 | `index.html` | Page shell, modal/toast containers, Firebase SDK init |
-| `app.js` (~5000 lines) | All application logic: routing, views, data, modals, CRUD, helpers |
-| `styles.css` (~1900 lines) | All styling, CSS variables, responsive breakpoints |
+| `app.js` (~6400 lines) | All application logic: routing, views, data, modals, CRUD, helpers |
+| `styles.css` (~3200 lines) | All styling, CSS variables, responsive breakpoints |
 | `stress-test.js` (~850 lines) | Manual stress/regression runner, attached as `window.StressTest` |
 
 ### Routing
 
-Hash-based SPA routing (`#dashboard`, `#stock`, `#pointage`, `#commandes`, `#production`, `#inventaire`, `#parametres`). The `navigateTo(page)` function renders the corresponding view.
+Hash-based SPA routing (`#dashboard`, `#stock`, `#pointage`, `#commandes`, `#livraisons`, `#production`, `#inventaire`, `#parametres`, `#archives`). The `navigateTo(page)` function renders the corresponding view.
 
 ### Data Layer
 

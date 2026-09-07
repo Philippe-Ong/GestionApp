@@ -8,6 +8,7 @@
     /* === Surfaces === */
     --bg: #F5F5F0;
     --bg-secondary: #F5F7F2;
+    --surface-alt: #EDEAE3;
     --white: #FFFFFF;
 
     /* === Texte === */
@@ -27,6 +28,8 @@
     --warning-light: #F1C40F;
     --success: #27AE60;
     --success-dark: #229954;
+    --success-strong: #3F6B2A;
+    --success-live: #3CA350;
 
     /* === Statuts (paires bg/fg du Design System) === */
     --success-bg: #B8D4A0;
@@ -37,6 +40,7 @@
     --error-fg: #C0392B;
     --info-bg: #A8C8E8;
     --info-fg: #2E72B8;
+    --info: #3498DB;
 
     /* === Ombres / overlay === */
     --shadow: 0 2px 8px rgba(0,0,0,0.08);
@@ -311,7 +315,7 @@ body {
 }
 
 .btn-secondary {
-    background: #EDEAE3;
+    background: var(--surface-alt);
     color: var(--text);
     border: none;
 }
@@ -522,7 +526,7 @@ textarea:focus-visible {
 
 .stat-icon.blue {
     background: rgba(52, 152, 219, 0.1);
-    color: #3498DB;
+    color: var(--info);
 }
 
 .stat-icon svg {
@@ -816,7 +820,7 @@ input[type="checkbox"] {
 
 .badge-success {
     background: var(--success-bg);
-    color: #3F6B2A;
+    color: var(--success-strong);
 }
 
 .badge-warning {
@@ -844,15 +848,15 @@ input[type="checkbox"] {
 .badge-planifiee  { background: var(--info-bg);    color: var(--info-fg); }
 .badge-produite   { background: var(--info-bg);    color: var(--info-fg); }
 .badge-bl-emis    { background: var(--info-bg);    color: var(--info-fg); }
-.badge-livree     { background: var(--success-bg); color: #3F6B2A; }
+.badge-livree     { background: var(--success-bg); color: var(--success-strong); }
 .badge-annulee    { background: var(--bg-secondary); color: var(--text-light); }
 
 .badge-brouillon  { background: var(--bg-secondary); color: var(--text-light); }
 .badge-envoyee    { background: var(--info-bg);    color: var(--info-fg); }
-.badge-payee      { background: var(--success-bg); color: #3F6B2A; }
+.badge-payee      { background: var(--success-bg); color: var(--success-strong); }
 .badge-en-retard  { background: var(--error-bg);   color: var(--error-fg); }
 
-.badge-ok      { background: var(--success-bg); color: #3F6B2A; }
+.badge-ok      { background: var(--success-bg); color: var(--success-strong); }
 .badge-bientot { background: var(--warning-bg); color: var(--warning-fg); }
 .badge-expire  { background: var(--error-bg);   color: var(--error-fg); }
 
@@ -2334,7 +2338,7 @@ input[type="checkbox"] {
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    color: #3F6B2A;
+    color: var(--success-strong);
     position: relative;
     flex-shrink: 0;
     font-size: 13px;
@@ -2348,7 +2352,7 @@ input[type="checkbox"] {
     right: -2px;
     width: 10px;
     height: 10px;
-    background: #3CA350;
+    background: var(--success-live);
     border: 2px solid var(--white);
     border-radius: 50%;
 }
@@ -2635,7 +2639,7 @@ input[type="checkbox"] {
     justify-content: center;
     font-size: var(--font-caption);
     font-weight: 700;
-    background: #EDEAE3;
+    background: var(--surface-alt);
     color: var(--text-lighter);
     border: 0 solid transparent;
     transition: var(--transition);

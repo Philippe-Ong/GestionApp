@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=2.8">
+    <link rel="stylesheet" href="styles.css?v=8.8">
 </head>
 <body>
     <aside class="sidebar">
@@ -33,7 +33,7 @@
         <nav aria-label="Navigation principale">
             <a href="#dashboard" class="nav-item active" data-page="dashboard">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                Dashboard
+                Accueil
             </a>
             <a href="#stock" class="nav-item" data-page="stock">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
@@ -75,9 +75,9 @@
             </button>
             <h2 id="pageTitle">Dashboard</h2>
             <div class="header-actions" id="headerActions">
-                <span style="font-size: 11px; color: var(--text-lighter);">v8.7</span>
+                <span style="font-size: 11px; color: var(--text-lighter);">v8.8</span>
                 <button id="syncBtn" class="btn btn-sm btn-secondary" onclick="window.forceFirebaseSync()" style="display:none;">
-                    🔄 Sync
+                    🔄 Synchroniser
                 </button>
             </div>
         </header>
@@ -162,7 +162,7 @@
             window.firebaseReady = false;
         }
     </script>
-    <script src="app.js?v=8.7"></script>
+    <script src="app.js?v=8.8"></script>
     <script>
         // Backup: show sync button after load
         setTimeout(() => {

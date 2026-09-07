@@ -164,7 +164,7 @@ const renderLivraisonsSansBLCard = (commandesLivreesSansBL, lookups) => {
                             return `
                                 <tr>
                                     <td>#${getCommandeNumero(cmd)}</td>
-                                    <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
+                                    <td>${escapeHtml(client?.societe || client?.nom || '—')}</td>
                                     <td>${cmd.dateLivraison || cmd.dateCommande ? formatDate(cmd.dateLivraison || cmd.dateCommande) : '-'}</td>
                                     <td>${articlesPreview}${getItems(cmd).length > 2 ? '...' : ''} (${totalItems})</td>
                                     <td>
@@ -204,6 +204,23 @@ const parseHHMM = (str) => {
     return h * 60 + min;
 };
 
+// Lecture sécurisée de la pause (minutes) — ignore valeurs négatives ou invalides.
+const safePauseMinutes = (pause) => {
+    const parsed = parseInt(pause, 10);
+    return Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+};
+
+// Durée d'un pointage en minutes (fin - début - pause). Gère le shift de nuit
+// (heureFin < heureDebut → passage par minuit, +24 h). Durée nulle si horodatages invalides.
+const calcPointageMinutes = (heureDebut, heureFin, pause) => {
+    const debutMin = parseHHMM(heureDebut);
+    const finMin = parseHHMM(heureFin);
+    if (debutMin === null || finMin === null) return 0;
+    let duree = finMin - debutMin;
+    if (duree < 0) duree += 24 * 60;
+    return Math.max(0, duree - safePauseMinutes(pause));
+};
+
 // Null-safe accessor for command/order line items.
 const getItems = (cmd) => (cmd && Array.isArray(cmd.items)) ? cmd.items : [];
 
@@ -231,10 +248,11 @@ const confirmDialog = (message, { danger = false, confirmLabel = 'Confirmer', ca
             modal.hide();
             resolve(result);
         };
+        const onOverlayHide = () => {
+            if (!overlayEl || !overlayEl.classList.contains('active')) settle(false);
+        };
         // Watch for the modal overlay losing the 'active' class (Escape, overlay click, X button).
-        const observer = overlayEl ? new MutationObserver(() => {
-            if (!overlayEl.classList.contains('active')) settle(false);
-        }) : null;
+        const observer = overlayEl ? new MutationObserver(onOverlayHide) : null;
         observer?.observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
         document.getElementById('__confirmOkBtn')?.addEventListener('click', () => settle(true));
         document.getElementById('__confirmCancelBtn')?.addEventListener('click', () => settle(false));
@@ -607,11 +625,57 @@ const DB = {
     }
 };
 
-const calculateAvailableStock = (lots, referenceDate = new Date()) => {
+const refNomKey = (nom) => String(nom || '').toLowerCase().trim();
+
+// Résout le nom canonique d'un lot : l'ID prime (arôme/format courant), sinon le nom stocké (legacy).
+const lookupRefById = (collection, id) => {
+    if (!collection || !id) return null;
+    if (typeof collection.get === 'function') return collection.get(id);
+    return (Array.isArray(collection) ? collection : []).find(x => x && x.id === id) || null;
+};
+
+const resolveAromeNom = (lot, aromesRef) => {
+    if (lot && lot.aromeId && aromesRef) {
+        const a = lookupRefById(aromesRef, lot.aromeId);
+        if (a && a.nom) return a.nom;
+    }
+    return lot?.arome || '';
+};
+
+const resolveFormatNom = (lot, formatsRef) => {
+    if (lot && lot.formatId && formatsRef) {
+        const f = lookupRefById(formatsRef, lot.formatId);
+        if (f && f.nom) return f.nom;
+    }
+    return lot?.format || '';
+};
+
+// Compare un lot à une référence arôme/format : match par ID quand les deux côtés en ont un,
+// sinon fallback sur les noms (compatible vieux lots stockés par nom).
+const lotMatchesRef = (lot, ref) => {
+    if (!lot || !ref) return false;
+    let aromeMatch = false;
+    if (ref.aromeId && lot.aromeId) {
+        aromeMatch = lot.aromeId === ref.aromeId;
+    } else if (ref.aromeNom !== undefined || lot.arome) {
+        aromeMatch = refNomKey(lot.arome) === refNomKey(ref.aromeNom);
+    }
+    let formatMatch = false;
+    if (ref.formatId && lot.formatId) {
+        formatMatch = lot.formatId === ref.formatId;
+    } else if (ref.formatNom !== undefined || lot.format) {
+        formatMatch = refNomKey(lot.format) === refNomKey(ref.formatNom);
+    }
+    return aromeMatch && formatMatch;
+};
+
+const calculateAvailableStock = (lots, referenceDate = new Date(), aromesRef = null, formatsRef = null) => {
     const ref = dateOnly(referenceDate);
     const stock = {};
     lots.filter(lot => !lot.dlc || dateOnly(lot.dlc) >= ref).forEach(lot => {
-        const key = `${lot.arome}-${lot.format}`;
+        const aromeNom = resolveAromeNom(lot, aromesRef);
+        const formatNom = resolveFormatNom(lot, formatsRef);
+        const key = `${aromeNom}-${formatNom}`;
         if (!stock[key]) stock[key] = 0;
         stock[key] += lot.quantite || 0;
     });
@@ -647,7 +711,7 @@ window.restoreBackupPreSync = restoreBackupPreSync;
 // Manual sync function
 window.forceFirebaseSync = async () => {
     const syncBtn = document.getElementById('syncBtn');
-    const restoreBtn = setBusy(syncBtn, 'Sync…');
+    const restoreBtn = setBusy(syncBtn, 'Synchronisation…');
     const { shouldSync } = await DB._shouldSync();
     if (!shouldSync) {
         restoreBtn();
@@ -705,7 +769,12 @@ const escapeHtml = (str) => {
 };
 
 const dateOnly = (d) => {
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        const parts = d.split('-');
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
     const dt = d instanceof Date ? new Date(d.getTime()) : new Date(d);
+    if (isNaN(dt.getTime())) return dt;
     dt.setHours(0, 0, 0, 0);
     return dt;
 };
@@ -713,7 +782,8 @@ const dateOnly = (d) => {
 const getStatus = (dlc, now, oneMonthFromNow) => {
     if (!dlc) return 'ok';
     const dlcDate = dateOnly(dlc);
-    if (now > dlcDate) return 'expired';
+    if (isNaN(dlcDate.getTime())) return 'warning';
+    if (dlcDate < now) return 'expired';
     if (dlcDate <= oneMonthFromNow) return 'warning';
     return 'ok';
 };
@@ -758,6 +828,19 @@ const disableSaveBtn = (event) => {
 // Modal
 const modal = {
     _previouslyFocused: null,
+    _backgroundEls: null,
+    _getBackgroundEls: () => {
+        if (!modal._backgroundEls) {
+            modal._backgroundEls = Array.from(document.querySelectorAll('aside.sidebar, nav.bottom-nav, main.main-content'));
+        }
+        return modal._backgroundEls;
+    },
+    _setBackgroundInert: (apply) => {
+        modal._getBackgroundEls().forEach(el => {
+            if (apply) el.setAttribute('inert', '');
+            else el.removeAttribute('inert');
+        });
+    },
     show: (title, body, footer, size = '') => {
         const titleEl = document.getElementById('modalTitle');
         const bodyEl = document.getElementById('modalBody');
@@ -768,13 +851,10 @@ const modal = {
         if (footerEl) footerEl.innerHTML = footer || '';
         if (overlayEl) {
             overlayEl.classList.add('active');
-            overlayEl.setAttribute('aria-hidden', 'false');
-        }
-        const container = document.getElementById('modalContainer');
-        if (container) {
-            container.className = 'modal-container' + (size === 'large' ? ' modal-large' : '');
+            overlayEl.removeAttribute('aria-hidden');
         }
         modal._previouslyFocused = document.activeElement;
+        modal._setBackgroundInert(true);
         const focusableSelector = 'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])';
         // Prefer focusing inside the body (form fields). Fall back to footer (action buttons),
         // which is what we want for confirmDialog whose body has no inputs.
@@ -789,6 +869,7 @@ const modal = {
             overlayEl.classList.remove('active');
             overlayEl.setAttribute('aria-hidden', 'true');
         }
+        modal._setBackgroundInert(false);
         if (modal._previouslyFocused && typeof modal._previouslyFocused.focus === 'function') {
             modal._previouslyFocused.focus();
             modal._previouslyFocused = null;
@@ -855,7 +936,7 @@ const navigateTo = (page) => {
     document.querySelectorAll(`[data-page="${page}"]`).forEach(el => el.classList.add('active'));
     
     const titles = {
-        dashboard: 'Dashboard',
+        dashboard: 'Accueil',
         stock: 'Gestion du stock',
         pointage: 'Pointage',
         commandes: 'Commandes',
@@ -866,7 +947,7 @@ const navigateTo = (page) => {
         parametres: 'Paramètres'
     };
     const titleEl = document.getElementById('pageTitle');
-    if (titleEl) titleEl.textContent = titles[page] || 'Dashboard';
+    if (titleEl) titleEl.textContent = titles[page] || 'Accueil';
     
     const views = {
         dashboard: renderDashboard,
@@ -888,6 +969,10 @@ const navigateTo = (page) => {
         viewFn();
     } else {
         renderDashboard();
+    }
+    if (typeof modal._getBackgroundEls === 'function' && modal._getBackgroundEls().length > 0) {
+        const isActive = document.getElementById('modalOverlay')?.classList.contains('active');
+        modal._setBackgroundInert(!!isActive);
     }
 };
 
@@ -922,13 +1007,14 @@ const renderDashboard = () => {
     const commandes = DB.get('commandes') || [];
     const pointages = DB.get('pointages') || [];
     const employes = DB.get('employees') || [];
-    const aromes = DB.get('aromes') || [];
-    const formats = DB.get('formats') || [];
+    const aromes = indexById(DB.get('aromes') || []);
+    const formats = indexById(DB.get('formats') || []);
 
     const today = new Date();
     const todayStr = getLocalDateISOString();
-    const oneMonthFromNow = new Date();
-    oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
+    const statusRefDate = dateOnly(today);
+    const statusWarnDate = new Date(statusRefDate);
+    statusWarnDate.setMonth(statusWarnDate.getMonth() + 1);
     const inSevenDays = new Date();
     inSevenDays.setDate(inSevenDays.getDate() + 7);
     const inThreeDays = new Date();
@@ -936,13 +1022,9 @@ const renderDashboard = () => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const expiries = lots.filter(lot => lot.dlc && new Date(lot.dlc) < today).length;
-    const moinsUnMois = lots.filter(lot => {
-        if (!lot.dlc) return false;
-        const dlc = new Date(lot.dlc);
-        return dlc >= today && dlc <= oneMonthFromNow;
-    }).length;
-    const sellableBottles = lots.filter(lot => lot.dlc && new Date(lot.dlc) >= today).reduce((sum, lot) => sum + (lot.quantite || 0), 0);
+    const expiries = lots.filter(lot => lot.dlc && getStatus(lot.dlc, statusRefDate, statusWarnDate) === 'expired').length;
+    const moinsUnMois = lots.filter(lot => lot.dlc && getStatus(lot.dlc, statusRefDate, statusWarnDate) === 'warning').length;
+    const sellableBottles = lots.filter(lot => lot.dlc && getStatus(lot.dlc, statusRefDate, statusWarnDate) !== 'expired').reduce((sum, lot) => sum + (lot.quantite || 0), 0);
 
     // Stock produit ces 7 derniers jours
     const stockLast7Days = lots
@@ -953,27 +1035,27 @@ const renderDashboard = () => {
     const commandesUrgentes = commandesEnAttente.filter(c => c.dateLivraison && new Date(c.dateLivraison) <= inThreeDays).length;
 
     const commandesPeriode = commandes.filter(c => c.statut !== 'annulee' && c.statut !== 'livrée');
-    const stockDisponible = calculateAvailableStock(lots, today);
+    const stockDisponible = calculateAvailableStock(lots, today, aromes, formats);
 
     const besoins = {};
     commandesPeriode.forEach(cmd => {
         getItems(cmd).forEach(item => {
-            const arome = aromes.find(a => a.id === item.aromeId);
-            const format = formats.find(f => f.id === item.formatId);
-            const key = `${arome?.nom || ''}-${format?.nom || ''}`;
+            const arome = aromes.get(item.aromeId);
+            const format = formats.get(item.formatId);
+            if (!arome || !arome.actif || !format || !format.actif) return;
+            const key = `${arome.nom}-${format.nom}`;
             if (!besoins[key]) {
                 besoins[key] = {
                     aromeId: item.aromeId,
                     formatId: item.formatId,
-                    aromeNom: arome?.nom || '',
-                    formatNom: format?.nom || '',
+                    aromeNom: arome.nom,
+                    formatNom: format.nom,
                     quantite: 0
                 };
             }
             besoins[key].quantite += item.quantite;
         });
     });
-
     const bouteillesAProduire = Object.entries(besoins).map(([key, b]) => {
         const disponible = stockDisponible[key] || 0;
         const aProduire = Math.max(0, b.quantite - disponible);
@@ -985,11 +1067,7 @@ const renderDashboard = () => {
     // Pointage du jour : a-t-on déjà pointé ? (premier pointage du patron / actif)
     const pointagesAujourdhui = pointages.filter(p => p.date === todayStr);
     const heuresAujourdhui = pointagesAujourdhui.reduce((sum, p) => {
-        const debutMin = parseHHMM(p.heureDebut);
-        const finMin = parseHHMM(p.heureFin);
-        if (debutMin === null || finMin === null) return sum;
-        const pause = parseInt(p.pause, 10) || 0;
-        const minutes = (finMin - debutMin) - pause;
+        const minutes = calcPointageMinutes(p.heureDebut, p.heureFin, p.pause);
         return sum + (minutes > 0 ? minutes / 60 : 0);
     }, 0);
 
@@ -1103,11 +1181,11 @@ const renderDashboard = () => {
             </div>
             ${bouteillesAProduire.length === 0 ? '<p style="color: var(--text-light); font-size: var(--font-body);">Tout le stock est disponible ✓</p>' : `
                 ${bouteillesAProduire.slice(0, 5).map((b, index, arr) => {
-                    const arome = aromes.find(a => a.id === b.aromeId);
-                    const format = formats.find(f => f.id === b.formatId);
+                    const arome = aromes.get(b.aromeId);
+                    const format = formats.get(b.formatId);
                     const formatLitres = format?.contenanceCl ? `${(format.contenanceCl / 100).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')}l` : b.formatNom;
                     return `<div class="flex-between" style="padding: 10px 0; ${index < arr.length - 1 ? 'border-bottom: 1px solid var(--border-light);' : ''}">
-                        <span style="display: inline-flex; align-items: center; gap: 8px;"><span class="color-dot" style="background: ${arome?.couleur || '#ccc'}; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>${escapeHtml(b.aromeNom)} ${escapeHtml(formatLitres)}</span>
+                        <span style="display: inline-flex; align-items: center; gap: 8px;"><span class="color-dot" style="background: ${escapeHtml(arome?.couleur || '#ccc')}; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>${escapeHtml(b.aromeNom)} ${escapeHtml(formatLitres)}</span>
                         <div style="text-align: right;">
                             <div style="font-size: var(--font-caption); color: var(--text-light);">Stock : ${b.disponible}</div>
                             <strong style="color: var(--primary);">À produire : ${b.aProduire}</strong>
@@ -1131,8 +1209,6 @@ const renderStock = () => {
     const aromes = DB.get('aromes') || [];
     const formats = DB.get('formats') || [];
 
-    const today = new Date();
-
     // Filtres persistés
     const savedQuery  = (DB.getFilter('stockQuery')  || '').toString().toLowerCase().trim();
     const savedArome  = DB.getFilter('stockArome')  || '';
@@ -1146,36 +1222,39 @@ const renderStock = () => {
 
     // Calculs globaux
     const sellableBottles = lots
-        .filter(lot => lot.dlc && new Date(lot.dlc) >= today)
+        .filter(lot => lot.dlc && getStatus(lot.dlc, statusRefDate, statusWarnDate) !== 'expired')
         .reduce((sum, lot) => sum + (lot.quantite || 0), 0);
 
     // Calcul vendable par arôme
     const sellableByAroma = {};
     aromes.filter(a => a.actif).forEach(a => { sellableByAroma[a.nom] = 0; });
     lots.forEach(lot => {
-        if (!lot.dlc || new Date(lot.dlc) < today) return;
-        if (sellableByAroma[lot.arome] !== undefined) {
-            sellableByAroma[lot.arome] += (lot.quantite || 0);
+        if (!lot.dlc || getStatus(lot.dlc, statusRefDate, statusWarnDate) === 'expired') return;
+        const aromeNom = resolveAromeNom(lot, aromes);
+        if (sellableByAroma[aromeNom] !== undefined) {
+            sellableByAroma[aromeNom] += (lot.quantite || 0);
         }
     });
 
     // Filtrer les lots selon les filtres actifs
     const filteredLots = lots.filter(lot => {
-        if (savedArome  && lot.arome  !== savedArome)  return false;
-        if (savedFormat && lot.format !== savedFormat) return false;
+        const aromeNom = resolveAromeNom(lot, aromes);
+        const formatNom = resolveFormatNom(lot, formats);
+        if (savedArome  && aromeNom  !== savedArome)  return false;
+        if (savedFormat && formatNom !== savedFormat) return false;
         if (savedStatut) {
             const st = getStatus(lot.dlc, statusRefDate, statusWarnDate);
             if (st !== savedStatut) return false;
         }
         if (savedQuery) {
-            const hay = `${lot.id || ''} ${lot.arome || ''} ${lot.format || ''} ${lot.quantite || ''}`.toLowerCase();
+            const hay = `${lot.id || ''} ${aromeNom} ${formatNom} ${lot.quantite || ''}`.toLowerCase();
             if (!hay.includes(savedQuery)) return false;
         }
         return true;
     }).sort((a, b) => new Date(b.dateProduction || 0) - new Date(a.dateProduction || 0));
 
-    const tileAromas = aromes.filter(a => a.actif);
-    const formatsActifs = formats.filter(f => f.actif);
+    const tileAromas = getActive('aromes');
+    const formatsActifs = getActive('formats');
 
     const aromaTilesHtml = `
         <a href="#stock" class="aroma-tile aroma-all ${!savedArome ? 'active' : ''}" data-arome="">
@@ -1202,10 +1281,12 @@ const renderStock = () => {
     const lotCardsHtml = filteredLots.length === 0
         ? '<div class="commande-empty">Aucun lot ne correspond aux filtres</div>'
         : filteredLots.map(lot => {
-            const arome = aromes.find(a => a.nom === lot.arome);
+            const aromeNom = resolveAromeNom(lot, aromes);
+            const formatNom = resolveFormatNom(lot, formats);
+            const arome = aromes.find(a => a.nom === aromeNom);
             const status = getStatus(lot.dlc, statusRefDate, statusWarnDate);
             const badgeClass = status === 'expired' ? 'badge-expire' : status === 'warning' ? 'badge-bientot' : 'badge-ok';
-            const statusLabel = status === 'expired' ? 'Expiré' : status === 'warning' ? '< 1 mois' : 'OK';
+            const statusLabel = status === 'expired' ? 'Expiré' : status === 'warning' ? '< 1 mois' : '✔';
             return `<div class="lot-card lot-status-${status}">
                 <div class="lot-card-header">
                     <span class="lot-card-numero">#${escapeHtml(String(lot.id).padStart(6, '0'))}</span>
@@ -1213,8 +1294,8 @@ const renderStock = () => {
                 </div>
                 <div class="lot-card-aroma">
                     <span class="aroma-tile-dot" style="background:${escapeHtml(arome?.couleur || '#ccc')}"></span>
-                    <span class="lot-card-aroma-name">${escapeHtml(lot.arome || '?')}</span>
-                    <span class="lot-card-aroma-format">• ${escapeHtml(lot.format || '?')}</span>
+                    <span class="lot-card-aroma-name">${escapeHtml(aromeNom || '?')}</span>
+                    <span class="lot-card-aroma-format">• ${escapeHtml(formatNom || '?')}</span>
                 </div>
                 <div class="lot-card-meta">
                     <span><strong class="lot-card-qty">${lot.quantite}</strong> bt</span>
@@ -1258,7 +1339,7 @@ const renderStock = () => {
         <div class="stock-pills-row">
             <span class="stock-pills-label">DLC :</span>
             <button type="button" class="status-pill ${!savedStatut ? 'active' : ''}" data-statut="">Tous</button>
-            ${statPill('ok', 'OK')}
+            ${statPill('ok', 'En règle')}
             ${statPill('warning', '< 1 mois')}
             ${statPill('expired', 'Expiré')}
         </div>
@@ -1415,7 +1496,7 @@ const renderHistoryTable = () => {
         return '<tr><td colspan="7" class="text-center">Aucun historique</td></tr>';
     }
     return history.map(record => {
-        const lotNum = record.lotId ? `#${String(record.lotId)}` : 'N/A';
+        const lotNum = record.lotId ? `#${String(record.lotId)}` : '—';
         return `
         <tr>
             <td>${lotNum}</td>
@@ -1464,16 +1545,24 @@ const saveLot = (event) => {
         
         const lots = DB.get('lots');
         const history = DB.get('history') || [];
-        
-        const existingLot = lots.find(l => 
-            l.arome === arome && 
-            l.format === format && 
+        const aromesRef = DB.get('aromes') || [];
+        const formatsRef = DB.get('formats') || [];
+        const aromeRef = aromesRef.find(a => a.nom === arome);
+        const formatRef = formatsRef.find(f => f.nom === format);
+        const aromeId = aromeRef?.id;
+        const formatId = formatRef?.id;
+        const ref = { aromeId, aromeNom: arome, formatId, formatNom: format };
+
+        const existingLot = lots.find(l =>
+            lotMatchesRef(l, ref) &&
             l.dateProduction === dateProduction
         );
         
         let newId;
         if (existingLot) {
             existingLot.quantite = (existingLot.quantite || 0) + quantite;
+            if (aromeId && existingLot.aromeId === undefined) existingLot.aromeId = aromeId;
+            if (formatId && existingLot.formatId === undefined) existingLot.formatId = formatId;
             newId = existingLot.id;
         } else {
             let maxNum = 0;
@@ -1493,6 +1582,8 @@ const saveLot = (event) => {
                 id: newId,
                 arome,
                 format,
+                aromeId: aromeId || '',
+                formatId: formatId || '',
                 quantite,
                 dateProduction,
                 dlv,
@@ -1590,7 +1681,7 @@ const showEditLotModal = (lotId) => {
         <form id="editLotForm">
             <div class="form-group">
                 <label>Quantité</label>
-                <input type="number" name="quantite" value="${lot.quantite}" min="1" required>
+                <input type="number" name="quantite" value="${lot.quantite}" min="0" required>
             </div>
             <div class="form-group">
                 <label>Date de production</label>
@@ -1626,20 +1717,61 @@ const saveEditLot = (event, lotId) => {
     const reenable = disableSaveBtn(event);
     const form = document.getElementById('editLotForm');
     const formData = new FormData(form);
-    
+
+    const quantite = parseFloat(formData.get('quantite'));
+    const dateProduction = formData.get('dateProduction');
+    const dlv = formData.get('dlv');
+    const dlc = formData.get('dlc');
+
+    if (isNaN(quantite) || quantite < 0) {
+        showToast('La quantité doit être un nombre valide supérieur ou égal à 0', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (!dateProduction || isNaN(new Date(dateProduction).getTime())) {
+        showToast('Date de production invalide', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (dlc && isNaN(new Date(dlc).getTime())) {
+        showToast('Date limite de consommation invalide', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (dlv && isNaN(new Date(dlv).getTime())) {
+        showToast('Date limite de vente invalide', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (dlv && dlc && dlc < dlv) {
+        showToast('La DLC doit être postérieure ou égale à la DLV', 'error');
+        if (reenable) reenable();
+        return;
+    }
+
     const lots = DB.get('lots');
     const lotIndex = lots.findIndex(l => l.id === lotId);
-    
-    if (lotIndex !== -1) {
-        lots[lotIndex].quantite = parseInt(formData.get('quantite'));
-        lots[lotIndex].dateProduction = formData.get('dateProduction');
-        lots[lotIndex].dlv = formData.get('dlv');
-        lots[lotIndex].dlc = formData.get('dlc');
-        DB.set('lots', lots);
-        modal.hide();
-        showToast('Lot modifié');
-        renderStock();
+
+    if (lotIndex === -1) {
+        if (reenable) reenable();
+        return;
     }
+    if (!lots[lotIndex].aromeId || !lots[lotIndex].formatId) {
+        const aromesRef = DB.get('aromes') || [];
+        const formatsRef = DB.get('formats') || [];
+        const aromeRef = aromesRef.find(a => a.nom === lots[lotIndex].arome);
+        const formatRef = formatsRef.find(f => f.nom === lots[lotIndex].format);
+        if (aromeRef) lots[lotIndex].aromeId = aromeRef.id;
+        if (formatRef) lots[lotIndex].formatId = formatRef.id;
+    }
+    lots[lotIndex].quantite = quantite;
+    lots[lotIndex].dateProduction = dateProduction;
+    lots[lotIndex].dlv = dlv;
+    lots[lotIndex].dlc = dlc;
+    DB.set('lots', lots);
+    modal.hide();
+    showToast('Lot modifié');
+    renderStock();
 };
 
 // Pointage
@@ -1712,11 +1844,37 @@ const renderPointage = (_tabIgnored) => {
                     ⏹ Départ
                 </button>
             </div>
+            ${pointageEnCours && pointageEnCours.heureDebut > currentTime ? '<p style="margin: 12px 0 0; font-size: var(--font-caption); opacity: 0.9;">Shift de nuit détecté : le total passera par minuit (+24 h).</p>' : ''}
         </div>
 
         <div class="card">
             <div class="card-header" style="margin-bottom: 12px; padding-bottom: 0; border: none;">
-                <h3 class="card-title">Qui pointe ?</h3>
+                <h3 class="card-title">Pointages en cours</h3>
+                <span style="font-size: var(--font-caption); color: var(--text-light);">${Object.keys(pointageEnCoursParEmp).length} ●</span>
+            </div>
+            ${Object.keys(pointageEnCoursParEmp).length === 0 ? '<p style="color: var(--text-light);">Aucun pointage en cours pour l\'instant.</p>' : `
+                <div class="history-rows">
+                    ${Object.entries(pointageEnCoursParEmp).sort((a, b) => (a[1].heureDebut || '').localeCompare(b[1].heureDebut || '')).map(([empId, p]) => {
+                        const emp = employes.find(x => x.id === empId);
+                        const isSelected = empId === selectedEmpId;
+                        const nuit = !!(p.heureDebut && p.heureDebut > currentTime);
+                        return `<div class="history-row pointage-live-row ${isSelected ? 'history-row-selected' : ''}" data-heure-debut="${escapeHtml(p.heureDebut || '')}" data-nuit="${nuit ? '1' : '0'}">
+                            <div class="avatar avatar-sm">${escapeHtml(initiales(emp))}</div>
+                            <div class="history-row-info">
+                                <div class="history-row-name">${escapeHtml((emp?.prenom || '') + ' ' + (emp?.nom || ''))}</div>
+                                <div class="history-row-times">${escapeHtml(p.heureDebut || '?')} → <time>${currentTime}</time>${nuit ? '<span class="live-nuit"> • nuit</span>' : ''}</div>
+                            </div>
+                            <div class="history-row-total">${isSelected ? '● sélectionné' : 'en cours'}</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            `}
+        </div>
+
+        <div class="card">
+            <div class="card-header" style="margin-bottom: 12px; padding-bottom: 0; border: none;">
+                <h3 class="card-title">Employés</h3>
+                <span style="font-size: var(--font-caption); color: var(--text-light);">${employesActifs.length} actif${employesActifs.length > 1 ? 's' : ''}</span>
             </div>
             ${employesActifs.length === 0 ? '<p style="color: var(--text-light);">Aucun employé actif. Ajoute-en depuis Paramètres.</p>' : `
                 <div class="employee-grid">
@@ -1738,6 +1896,7 @@ const renderPointage = (_tabIgnored) => {
         <div class="card">
             <div class="card-header" style="margin-bottom: 12px; padding-bottom: 0; border: none;">
                 <h3 class="card-title">Saisie manuelle</h3>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="renderPointage()">↺ Actualiser</button>
             </div>
             <form id="quickPointageForm">
                 <div class="form-row">
@@ -1765,6 +1924,7 @@ const renderPointage = (_tabIgnored) => {
                     <div class="form-group">
                         <label>Pause (min)</label>
                         <input type="number" name="pause" value="0" min="0">
+                        <small class="text-muted">Départ avant arrivée = nuit (+24 h)</small>
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary" onclick="saveQuickPointage(event)">Enregistrer</button>
@@ -1779,25 +1939,24 @@ const renderPointage = (_tabIgnored) => {
             ${historiqueJour.length === 0 ? '<p style="color: var(--text-light); font-size: var(--font-body);">Aucun pointage aujourd\'hui pour l\'instant.</p>' : `
                 ${historiqueJour.map(p => {
                     const emp = employes.find(x => x.id === p.employeId);
-                    const debutMin = parseHHMM(p.heureDebut);
-                    const finMin = parseHHMM(p.heureFin);
-                    const pause = parseInt(p.pause, 10) || 0;
-                    let totalLabel = '— en cours';
-                    if (debutMin !== null && finMin !== null) {
-                        const totalMin = (finMin - debutMin) - pause;
+                    const pause = safePauseMinutes(p.pause);
+                    let totalLabel = '';
+                    if (p.heureFin) {
+                        const totalMin = calcPointageMinutes(p.heureDebut, p.heureFin, pause);
                         if (totalMin > 0) {
                             const h = Math.floor(totalMin / 60);
                             const m = totalMin % 60;
                             totalLabel = `${h}h${m > 0 ? ' ' + m + 'min' : ''}`;
                         }
                     }
+                    const isNuit = !!(p.heureDebut && p.heureFin && p.heureDebut > p.heureFin);
                     return `<div class="history-row">
                         <div class="avatar avatar-sm">${escapeHtml(initiales(emp))}</div>
                         <div class="history-row-info">
                             <div class="history-row-name">${escapeHtml((emp?.prenom || '') + ' ' + (emp?.nom || ''))}</div>
-                            <div class="history-row-times">${escapeHtml(p.heureDebut || '?')} → ${escapeHtml(p.heureFin || '...')}${pause ? ' • pause ' + pause + ' min' : ''}</div>
+                            <div class="history-row-times">${escapeHtml(p.heureDebut || '?')} → ${escapeHtml(p.heureFin || '...')}${pause ? ' • pause ' + pause + ' min' : ''}${isNuit ? ' • nuit' : ''}</div>
                         </div>
-                        <div class="history-row-total">${totalLabel}</div>
+                        <div class="history-row-total">${totalLabel || '— en cours'}</div>
                     </div>`;
                 }).join('')}
             `}
@@ -1815,6 +1974,17 @@ const renderPointage = (_tabIgnored) => {
         const timeEl = document.querySelector('.pointage-hero .current-time');
         if (timeEl) {
             timeEl.textContent = new Date().toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' });
+            const now = new Date().toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' });
+            document.querySelectorAll('.pointage-live-row').forEach(row => {
+                const debut = row.dataset.heureDebut;
+                if (row.dataset.nuit === '1' && debut <= now) {
+                    row.dataset.nuit = '0';
+                    const nuitEl = row.querySelector('.live-nuit');
+                    if (nuitEl) nuitEl.hidden = true;
+                }
+                const timeEl = row.querySelector('.history-row-times time');
+                if (timeEl) timeEl.textContent = now;
+            });
         } else {
             // L'élément n'est plus dans le DOM → l'utilisateur a navigué ailleurs, on arrête
             clearInterval(pointageClockInterval);
@@ -1840,9 +2010,7 @@ const pointageQuickArrivee = () => {
     const mm = String(now.getMinutes()).padStart(2, '0');
     const heureDebut = `${hh}:${mm}`;
     const today = getLocalDateISOString();
-
     const pointages = DB.get('pointages') || [];
-    // Vérifier qu'aucun pointage du jour pour cet employé n'est en cours
     const enCours = pointages.find(p => p.date === today && p.employeId === pointageSelectedEmployeId && !p.heureFin);
     if (enCours) {
         showToast('Pointage déjà en cours pour cet employé', 'error');
@@ -1880,7 +2048,7 @@ const pointageQuickDepart = () => {
     const mm = String(now.getMinutes()).padStart(2, '0');
     enCours.heureFin = `${hh}:${mm}`;
     DB.set('pointages', pointages);
-    showToast(`Départ pointé à ${enCours.heureFin}`);
+    showToast(`Départ pointé à ${enCours.heureFin}${enCours.heureDebut > enCours.heureFin ? ' (shift de nuit)' : ''}`);
     renderPointage();
 };
 
@@ -1914,7 +2082,7 @@ const showPointageStatsModal = () => {
                 <div class="dash-kpi-card"><div class="dash-kpi-label">Total heures</div><div class="dash-kpi-value">${stats.totalHours}h</div></div>
                 <div class="dash-kpi-card"><div class="dash-kpi-label">Jours travaillés</div><div class="dash-kpi-value">${stats.daysWorked}</div></div>
             </div>
-            <div class="dash-kpi-card" style="margin-bottom: 16px;"><div class="dash-kpi-label">Moyenne / jour</div><div class="dash-kpi-value">${stats.avgHours}h</div></div>
+            <div class="dash-kpi-card" style="margin-bottom: 16px;"><div class="dash-kpi-label">Moyenne / employé / jour</div><div class="dash-kpi-value">${stats.avgHours}h</div></div>
             ${stats.employeeStats.length > 0 ? `
                 <h4 style="margin: 12px 0 8px; font-size: var(--font-body-lg);">Répartition par employé</h4>
                 <div class="bar-chart">
@@ -1945,7 +2113,7 @@ const refreshPointageStatsModal = () => {
             <div class="dash-kpi-card"><div class="dash-kpi-label">Total heures</div><div class="dash-kpi-value">${stats.totalHours}h</div></div>
             <div class="dash-kpi-card"><div class="dash-kpi-label">Jours travaillés</div><div class="dash-kpi-value">${stats.daysWorked}</div></div>
         </div>
-        <div class="dash-kpi-card" style="margin-bottom: 16px;"><div class="dash-kpi-label">Moyenne / jour</div><div class="dash-kpi-value">${stats.avgHours}h</div></div>
+        <div class="dash-kpi-card" style="margin-bottom: 16px;"><div class="dash-kpi-label">Moyenne / employé / jour</div><div class="dash-kpi-value">${stats.avgHours}h</div></div>
         ${stats.employeeStats.length > 0 ? `
             <h4 style="margin: 12px 0 8px; font-size: var(--font-body-lg);">Répartition par employé</h4>
             <div class="bar-chart">
@@ -2017,24 +2185,20 @@ const renderHistoriqueTable = (pointages, employes) => {
     
     return filtered.map(p => {
         const emp = employes.find(e => e.id === p.employeId);
-        const debutMin = parseHHMM(p.heureDebut);
-        const finMin = parseHHMM(p.heureFin);
-        let totalMinutes = 0;
-        if (debutMin !== null && finMin !== null) {
-            totalMinutes = finMin - debutMin - (p.pause || 0);
-        }
+        const pause = safePauseMinutes(p.pause);
+        const totalMinutes = p.heureFin ? calcPointageMinutes(p.heureDebut, p.heureFin, pause) : 0;
         const heures = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
 
         return `
             <tr>
                 <td>${formatDate(p.date)}</td>
-                <td>${emp ? escapeHtml(emp.prenom + ' ' + emp.nom) : 'N/A'}</td>
+                <td>${emp ? escapeHtml(emp.prenom + ' ' + emp.nom) : '—'}</td>
                 <td>${escapeHtml(p.heureDebut || '-')}</td>
                 <td>${escapeHtml(p.heureFin || '-')}</td>
-                <td>${p.pause || 0} min</td>
+                <td>${pause} min</td>
                 <td>${totalMinutes > 0 ? `${heures}h ${mins}min` : '-'}</td>
-                <td>
+                <td>${p.heureDebut && p.heureFin && p.heureDebut > p.heureFin ? '<span class="badge badge-info">nuit</span>' : ''}
                     <button class="btn btn-sm btn-danger" onclick="deletePointage('${p.id}')">Supprimer</button>
                 </td>
             </tr>
@@ -2052,7 +2216,6 @@ const getMonday = (d) => {
 const getPointageStats = (pointages, employes) => {
     const statsEmploye = document.getElementById('statsEmploye')?.value || '';
     const statsPeriod = document.getElementById('statsPeriod')?.value || 'week';
-    
     const now = new Date();
     let startDate, endDate;
     
@@ -2084,25 +2247,20 @@ const getPointageStats = (pointages, employes) => {
     }
     
     const totalMinutes = filtered.reduce((acc, p) => {
-        const debutMin = parseHHMM(p.heureDebut);
-        const finMin = parseHHMM(p.heureFin);
-        if (debutMin === null || finMin === null) return acc;
-        const diff = finMin - debutMin - (p.pause || 0);
+        const diff = calcPointageMinutes(p.heureDebut, p.heureFin, p.pause);
         return acc + (diff > 0 ? diff : 0);
     }, 0);
     
     const totalHours = (totalMinutes / 60).toFixed(1);
     const daysWorked = new Set(filtered.map(p => p.date)).size;
-    const avgHours = daysWorked > 0 ? (totalMinutes / 60 / daysWorked).toFixed(1) : 0;
+    const employeJours = new Set(filtered.map(p => `${p.employeId}|${p.date}`)).size;
+    const avgHours = employeJours > 0 ? (totalMinutes / 60 / employeJours).toFixed(1) : 0;
     
     // Employee stats
     const empStats = {};
     filtered.forEach(p => {
         if (!empStats[p.employeId]) empStats[p.employeId] = 0;
-        const debutMin = parseHHMM(p.heureDebut);
-        const finMin = parseHHMM(p.heureFin);
-        if (debutMin === null || finMin === null) return;
-        const diff = finMin - debutMin - (p.pause || 0);
+        const diff = calcPointageMinutes(p.heureDebut, p.heureFin, p.pause);
         if (diff > 0) empStats[p.employeId] += diff / 60;
     });
     
@@ -2128,7 +2286,8 @@ const saveQuickPointage = (event) => {
     const date = formData.get('date');
     const heureDebut = formData.get('heureDebut');
     const heureFin = formData.get('heureFin');
-    const pause = parseInt(formData.get('pause')) || 0;
+    const pause = safePauseMinutes(formData.get('pause'));
+    const dureeBruteMin = calcPointageMinutes(heureDebut, heureFin, 0);
     
     if (!employeId || !date || !heureDebut || !heureFin) {
         showToast('Veuillez remplir tous les champs', 'error');
@@ -2140,8 +2299,17 @@ const saveQuickPointage = (event) => {
         if (reenable) reenable();
         return;
     }
-    if (parseHHMM(heureFin) <= parseHHMM(heureDebut)) {
-        showToast('L\'heure de fin doit être après l\'heure de début', 'error');
+    if (parseHHMM(heureDebut) === parseHHMM(heureFin)) {
+        showToast('L\'heure de fin doit être différente de l\'heure de début', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (pause >= dureeBruteMin) {
+        showToast('La pause doit être inférieure à la durée du shift', 'error');
+        if (reenable) reenable();
+        return;
+    }
+    if (parseHHMM(heureFin) < parseHHMM(heureDebut) && !confirm('Shift de nuit détecté (fin après minuit). Enregistrer ce pointage ?')) {
         if (reenable) reenable();
         return;
     }
@@ -2185,19 +2353,17 @@ const exportPointageExcel = () => {
     
     filtered.forEach(p => {
         const emp = employes.find(e => e.id === p.employeId);
-        const empName = emp ? emp.prenom + ' ' + emp.nom : 'N/A';
+        const empName = emp ? emp.prenom + ' ' + emp.nom : '—';
         
-        const debutMin = parseHHMM(p.heureDebut);
-        const finMin = parseHHMM(p.heureFin);
         let totalMinutes = 0;
-        if (debutMin !== null && finMin !== null) {
-            totalMinutes = finMin - debutMin - (p.pause || 0);
+        if (p.heureFin) {
+            totalMinutes = calcPointageMinutes(p.heureDebut, p.heureFin, p.pause);
         }
         const heures = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
         const duree = totalMinutes > 0 ? `${heures}h ${mins}min` : '-';
         
-        csv += `${p.date},${empName},${p.heureDebut || '-'},${p.heureFin || '-'},${p.pause || 0},${duree}\n`;
+        csv += `${p.date},${empName},${p.heureDebut || '-'},${p.heureFin || '-'},${safePauseMinutes(p.pause)},${duree}\n`;
     });
     
     // Download CSV
@@ -2843,6 +3009,36 @@ const updateCommandeStatut = (id, statut) => {
     renderCommandes();
 };
 
+const recreerLotRestitution = (lots, entree) => {
+    const entreeAromeId = entree.aromeId || null;
+    const entreeFormatId = entree.formatId || null;
+    if (entreeAromeId && entreeFormatId) {
+        const arome = (DB.get('aromes') || []).find(a => a.id === entreeAromeId);
+        const format = (DB.get('formats') || []).find(f => f.id === entreeFormatId);
+        if (arome && format && entree.lotId) {
+            const restored = lots.find(l => l.id === entree.lotId && lotMatchesRef(l, { aromeId: entreeAromeId, aromeNom: arome.nom, formatId: entreeFormatId, formatNom: format.nom }));
+            if (restored) {
+                restored.quantite = (restored.quantite || 0) + entree.quantite;
+                return true;
+            }
+        }
+        if (arome && format) {
+            const lot = {
+                arome: arome.nom,
+                format: format.nom,
+                aromeId: entreeAromeId,
+                formatId: entreeFormatId,
+                quantite: entree.quantite
+            };
+            if (entree.dateProduction) lot.dateProduction = entree.dateProduction;
+            if (entree.dlc) lot.dlc = entree.dlc;
+            lots.push({ id: entree.lotId || generateId(), ...lot });
+            return true;
+        }
+    }
+    return false;
+};
+
 const restaurerCommande = (id) => {
     const commande = DB.get('commandes').find(c => c.id === id);
     if (!commande) return;
@@ -2862,14 +3058,13 @@ const restaurerCommande = (id) => {
         if (hasLots) {
             const lots = DB.get('lots') || [];
             lotsUtilises.forEach(entree => {
+                const recreated = recreerLotRestitution(lots, entree);
+                if (recreated) return;
                 const existing = lots.find(l => l.id === entree.lotId);
                 if (existing) {
                     existing.quantite = (existing.quantite || 0) + entree.quantite;
                 } else {
-                    const lot = { arome: entree.arome, format: entree.format, quantite: entree.quantite };
-                    if (entree.dateProduction) lot.dateProduction = entree.dateProduction;
-                    if (entree.dlc) lot.dlc = entree.dlc;
-                    lots.push({ id: entree.lotId || generateId(), ...lot });
+                    lots.push({ id: entree.lotId || generateId(), arome: entree.arome, format: entree.format, quantite: entree.quantite });
                 }
             });
             const commandes = DB.get('commandes');
@@ -2902,13 +3097,15 @@ const showLivraisonBouteillesModal = (commandeId) => {
     }
 
     const client = clients.find(cl => cl.id === cmd.clientId);
-    const clientName = client ? (client.societe || client.nom) : 'N/A';
+    const clientName = client ? (client.societe || client.nom) : '—';
     const totalItems = (cmd.items || []).reduce((sum, i) => sum + i.quantite, 0);
 
-    const normalize = (s) => (s || '').toString().toLowerCase().trim();
+    const livrRefDate = dateOnly(new Date());
+    const livrWarnDate = new Date(livrRefDate);
+    livrWarnDate.setMonth(livrWarnDate.getMonth() + 1);
 
     const sortedLots = [...lots]
-        .filter(lot => new Date(lot.dlc || '9999-12-31') >= new Date())
+        .filter(lot => getStatus(lot.dlc, livrRefDate, livrWarnDate) !== 'expired')
         .sort((a, b) => new Date(a.dateProduction || '1970-01-01') - new Date(b.dateProduction || '1970-01-01'));
 
     const lignesHtml = getItems(cmd).map(item => {
@@ -2916,14 +3113,8 @@ const showLivraisonBouteillesModal = (commandeId) => {
         const format = formats.find(f => f.id === item.formatId);
         const aromeNom = arome?.nom || '?';
         const formatNom = format?.nom || '?';
-        const aromeNorm = normalize(aromeNom);
-        const formatNorm = normalize(formatNom);
-
-        const lotsDisponibles = sortedLots.filter(lot =>
-            normalize(lot.arome) === aromeNorm &&
-            normalize(lot.format) === formatNorm &&
-            lot.quantite > 0
-        );
+        const lotRef = { aromeId: item.aromeId, aromeNom, formatId: item.formatId, formatNom };
+        const lotsDisponibles = sortedLots.filter(lot => lot.quantite > 0 && lotMatchesRef(lot, lotRef));
 
         let autoFilled = [];
         let remaining = item.quantite;
@@ -3027,6 +3218,8 @@ const showLivraisonBouteillesModal = (commandeId) => {
                     lotId: lot.id,
                     arome: lot.arome,
                     format: lot.format,
+                    aromeId: lot.aromeId || '',
+                    formatId: lot.formatId || '',
                     quantite
                 });
             });
@@ -3097,7 +3290,7 @@ const showCommandeDetails = (id) => {
     if (!commande) return;
 
     const client = clients.find(c => c.id === commande.clientId);
-    const clientName = client ? (client.societe || client.nom) : 'N/A';
+    const clientName = client ? (client.societe || client.nom) : '—';
     const totalItems = (commande.items || []).reduce((sum, i) => sum + (i.quantite || 0), 0);
     const montant = getCommandeMontant(commande, clients, formats);
 
@@ -3402,7 +3595,7 @@ const renderArchives = () => {
                                 return `
                                     <tr>
                                         <td>${getCommandeNumero(cmd)}</td>
-                                        <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
+                                        <td>${escapeHtml(client?.societe || client?.nom || '—')}</td>
                                         <td>${formatDate(cmd.dateCommande)}</td>
                                         <td>${formatDate(cmd.dateLivraison)}</td>
                                         <td>${articlesPreview}${safeItems.length > 2 ? '...' : ''} (${totalItems})</td>
@@ -3451,7 +3644,7 @@ const exportArchivesExcel = async () => {
 
             return {
                 'N°': getCommandeNumero(cmd),
-                'Client': client?.societe || client?.nom || 'N/A',
+                'Client': client?.societe || client?.nom || '—',
                 'Catégorie tarif': normalizeTarifKey(client?.tarifs),
                 'Date commande': cmd.dateCommande || '',
                 'Date livraison': cmd.dateLivraison || '',
@@ -3581,7 +3774,7 @@ const showCreateBLModal = () => {
             return `
                 <tr>
                     <td>#${getCommandeNumero(cmd)}</td>
-                    <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
+                    <td>${escapeHtml(client?.societe || client?.nom || '—')}</td>
                     <td>${cmd.dateLivraison || cmd.dateCommande ? formatDate(cmd.dateLivraison || cmd.dateCommande) : '-'}</td>
                     <td><span class="badge ${cmd.statut === 'livrée' ? 'badge-livree' : 'badge-produite'}">${statusLabel}</span></td>
                     <td>${articlesPreview}${getItems(cmd).length > 2 ? '...' : ''} (${totalItems})</td>
@@ -3705,7 +3898,7 @@ const renderLivraisons = () => {
                                     <tr>
                                         <td>BL-${getBLNumero(liv)}</td>
                                         <td>#${commande ? getCommandeNumero(commande) : liv.commandeId.slice(-5)}</td>
-                                        <td>${escapeHtml(client?.societe || client?.nom || 'N/A')}</td>
+                                        <td>${escapeHtml(client?.societe || client?.nom || '—')}</td>
                                         <td>${formatDate(liv.dateBL)}</td>
                                         <td>${articlesPreview}${lignes.length > 2 ? '...' : ''} (${totalItems})</td>
                                         <td>
@@ -3755,7 +3948,7 @@ const showLivraisonDetails = (id) => {
 
     modal.show(`BL #${getBLNumero(livraison)}`, `
         <div class="commande-details">
-            <p><strong>Client:</strong> ${escapeHtml(client?.societe || client?.nom || 'N/A')}</p>
+            <p><strong>Client:</strong> ${escapeHtml(client?.societe || client?.nom || '—')}</p>
             <p><strong>Date BL:</strong> ${formatDate(livraison.dateBL)}</p>
             <p><strong>N° Commande:</strong> #${commande ? getCommandeNumero(commande) : livraison.commandeId.slice(-5)}</p>
             <p><strong>Total:</strong> ${totalItems} articles</p>
@@ -3802,7 +3995,6 @@ const AROME_BL_NAMES = {
     'hibiscus': 'Hibiscus',
     'coing': 'Coing',
     'edition noel': 'Edition Noël',
-    'edition noel': 'Edition Noël',
     'menthe': 'Menthe'
 };
 
@@ -3811,8 +4003,10 @@ const getAromeBLName = (nom) => {
     const lower = nom.toLowerCase().trim();
     const mapped = AROME_BL_NAMES[lower];
     if (mapped) return mapped;
-    const base = lower.replace(/s$/, '');
-    return AROME_BL_NAMES[base] || nom;
+    const sansS = lower.replace(/s$/, '');
+    if (AROME_BL_NAMES[sansS]) return AROME_BL_NAMES[sansS];
+    if (AROME_BL_NAMES[lower + 's']) return AROME_BL_NAMES[lower + 's'];
+    return String(nom).trim().charAt(0).toUpperCase() + String(nom).trim().slice(1);
 };
 
 const generateBL = (commandeId) => {
@@ -3901,6 +4095,11 @@ const exportBLExcel = (livraisonId) => {
     const livraison = livraisons.find(l => l.id === livraisonId);
     if (!livraison) {
         showToast('Livraison non trouvée', 'error');
+        return;
+    }
+
+    if (typeof JSZip === 'undefined') {
+        showToast('Bibliothèque Excel non chargée. Vérifiez la connexion.', 'error');
         return;
     }
 
@@ -4253,7 +4452,7 @@ const renderProduction = () => {
     );
     
     const now = new Date();
-    const stockDisponible = calculateAvailableStock(lots, now);
+    const stockDisponible = calculateAvailableStock(lots, now, aromes, formats);
     
     // Calculate totals by arome and format (using names from commands)
     const besoins = {};
@@ -4293,6 +4492,7 @@ const renderProduction = () => {
     Object.entries(litresParArome).forEach(([aromeNom, litres]) => {
         const arome = aromes.find(a => a.nom === aromeNom);
         const recette = recettes.find(r => r.aromeId === arome?.id);
+        const aromeId = arome?.id || '';
         if (recette) {
             recette.ingredients.forEach(ing => {
                 const ingUnit = displayUnit(ing.unite);
@@ -4367,7 +4567,7 @@ const renderProduction = () => {
                   Object.values(productionNecesaire).map(b => {
                       const arome = aromes.find(a => a.nom === b.aromeNom);
                       return `<div class="flex-between" style="padding: 8px 0; border-bottom: 1px solid var(--border-light);">
-                          <span><span class="color-dot" style="background: ${arome?.couleur || '#ccc'}"></span>${b.aromeNom} ${b.formatNom}</span>
+                          <span><span class="color-dot" style="background: ${escapeHtml(arome?.couleur || '#ccc')}"></span>${escapeHtml(b.aromeNom)} ${escapeHtml(b.formatNom)}</span>
                           <div style="text-align: right;">
                               <div style="font-size: 12px; color: var(--text-muted);">Stock: ${b.disponible} bt</div>
                               <strong>À produire: ${b.aProduire} bt</strong>
@@ -4385,7 +4585,7 @@ const renderProduction = () => {
                   Object.entries(litresParArome).map(([aromeNom, litres]) => {
                       const arome = aromes.find(a => a.nom === aromeNom);
                       return `<div class="flex-between" style="padding: 8px 0; border-bottom: 1px solid var(--border-light);">
-                          <span><span class="color-dot" style="background: ${arome?.couleur || '#ccc'}"></span>${escapeHtml(aromeNom)}</span>
+                          <span><span class="color-dot" style="background: ${escapeHtml(arome?.couleur || '#ccc')}"></span>${escapeHtml(aromeNom)}</span>
                           <strong>${litres.toFixed(1)} L</strong>
                       </div>`;
                   }).join('')}
@@ -4403,7 +4603,7 @@ const renderProduction = () => {
                       return `
                         <div class="cuve-arome">
                           <div class="cuve-header">
-                            <span class="color-dot" style="background: ${arome?.couleur || '#ccc'}"></span>
+                            <span class="color-dot" style="background: ${escapeHtml(arome?.couleur || '#ccc')}"></span>
                             <strong>${escapeHtml(aromeNom)}</strong>
                             <span> - ${totalLitres.toFixed(1)}L (${cuves.length} cuve${cuves.length > 1 ? 's' : ''})</span>
                           </div>
@@ -4596,9 +4796,41 @@ const normalizeName = (value) => {
         .replace(/[^a-z0-9]/g, '');
 };
 
+const stripDiacriticsToken = (token) => {
+    return String(token || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '');
+};
+
+const getSingularPluralVariants = (nom) => {
+    const tokens = String(nom || '').toLowerCase().split(/[^a-z0-9à-öø-ÿ]+/i).filter(Boolean);
+    const exact = tokens.map(stripDiacriticsToken).join('');
+    const sansS = tokens.map(t => t.length > 1 && t.endsWith('s') ? t.slice(0, -1) : t).map(stripDiacriticsToken).join('');
+    const avecS = tokens.map(t => !t.endsWith('s') ? t + 's' : t).map(stripDiacriticsToken).join('');
+    return [exact, sansS, avecS];
+};
+
+const inventaireNamesMatch = (nomA, nomB) => {
+    const target = normalizeName(nomA);
+    return getSingularPluralVariants(nomB).includes(target);
+};
+
+const singularPluralMatch = (nom, targetNom) => {
+    const tokBase = (t) => {
+        const d = stripDiacriticsToken(t);
+        return (d.length > 1 && d.endsWith('s')) ? d.slice(0, -1) : d;
+    };
+    const tokensA = String(nom || '').toLowerCase().split(/[^a-z0-9à-öø-ÿ]+/i).filter(Boolean).map(tokBase);
+    const tokensB = String(targetNom || '').toLowerCase().split(/[^a-z0-9à-öø-ÿ]+/i).filter(Boolean).map(tokBase);
+    if (tokensA.length !== tokensB.length) return false;
+    return tokensA.every((tok, i) => tok === tokensB[i]);
+};
+
 const findInventaireItemByName = (items, nom) => {
-    const target = normalizeName(nom);
-    return items.find(i => normalizeName(i.nom) === target) || null;
+    const exact = items.find(i => inventaireNamesMatch(nom, i.nom));
+    if (exact) return exact;
+    return items.find(i => singularPluralMatch(i.nom, nom)) || null;
 };
 
 const isWaterIngredient = (nom) => {
@@ -4842,16 +5074,23 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
         const dateProduction = getLocalDateISOString();
         const dates = calculateDates(dateProduction);
 
+        const aromeRef = aromes.find(a => a.nom === aromeNom);
+        const aromeId = aromeRef?.id || '';
+        const refArome = { aromeId, aromeNom };
+
         producedByFormat.forEach(({ format, quantite }) => {
+            const formatId = format.id || '';
+            const ref = { ...refArome, formatId, formatNom: format.nom };
             const existingLot = lots.find(l =>
-                l.arome === aromeNom &&
-                l.format === format.nom &&
-                l.dateProduction === dateProduction
+                l.dateProduction === dateProduction &&
+                lotMatchesRef(l, ref)
             );
 
             let lotId;
             if (existingLot) {
                 existingLot.quantite = (existingLot.quantite || 0) + quantite;
+                if (aromeId && existingLot.aromeId === undefined) existingLot.aromeId = aromeId;
+                if (formatId && existingLot.formatId === undefined) existingLot.formatId = formatId;
                 lotId = existingLot.id;
             } else {
                 let maxNum = 0;
@@ -4865,6 +5104,8 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
                     id: lotId,
                     arome: aromeNom,
                     format: format.nom,
+                    aromeId,
+                    formatId,
                     quantite,
                     dateProduction,
                     dlv: dates.dlv,
@@ -4883,6 +5124,7 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
             });
         });
 
+
         DB.setMany({ inventaire: inventaire, lots: lots, history: history });
 
         modal.hide();
@@ -4897,40 +5139,58 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
 };
 
 // Inventaire
-const renderInventaire = () => {
-    // Initialize default consumables if list is empty
-    const defaultConsommables = [
-        { nom: 'Eau', unite: 'L', seuilAlerte: 0 },
-        { nom: 'Sucre', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Citron', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Menthe', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Hibiscus', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Mûre sauvage', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Poire à botzi', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Sureau', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Herbes des alpes', unite: 'kg', seuilAlerte: 0 },
-        { nom: 'Capsules', unite: 'pcs', seuilAlerte: 0 },
-        { nom: 'Étiquettes', unite: 'pcs', seuilAlerte: 0 },
-        { nom: 'Bouteilles vides 25cl', unite: 'pcs', seuilAlerte: 0 },
-        { nom: 'Bouteilles vides 50cl', unite: 'pcs', seuilAlerte: 0 },
-        { nom: 'Bouteilles vides 1L', unite: 'pcs', seuilAlerte: 0 }
-    ];
-    
-    let items = DB.get('inventaire');
-    if (items.length === 0) {
-        items = defaultConsommables.map(item => ({
-            ...item,
+const DEFAULT_CONSOMMABLES = [
+    { nom: 'Eau', unite: 'L', seuilAlerte: 0 },
+    { nom: 'Sucre', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Citron', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Menthe', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Hibiscus', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Mûre sauvage', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Poire à botzi', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Sureau', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Herbes des alpes', unite: 'kg', seuilAlerte: 0 },
+    { nom: 'Capsules', unite: 'pcs', seuilAlerte: 0 },
+    { nom: 'Étiquettes', unite: 'pcs', seuilAlerte: 0 },
+    { nom: 'Bouteilles vides 25cl', unite: 'pcs', seuilAlerte: 0 },
+    { nom: 'Bouteilles vides 50cl', unite: 'pcs', seuilAlerte: 0 },
+    { nom: 'Bouteilles vides 1L', unite: 'pcs', seuilAlerte: 0 }
+];
+
+const seedDefaultConsommables = () => {
+    const items = DB.get('inventaire') || [];
+    let count = 0;
+    DEFAULT_CONSOMMABLES.forEach(d => {
+        if (items.some(i => inventaireNamesMatch(d.nom, i.nom))) return;
+        items.push({
+            ...d,
             id: generateId(),
             categorie: 'consommable',
             quantite: 0
-        }));
-        DB.set('inventaire', items);
-    }
-    
-    const consommables = items.filter(i => i.categorie === 'consommable');
-    const equipement = items.filter(i => i.categorie === 'equipement');
+        });
+        count++;
+    });
+    if (count > 0) DB.set('inventaire', items);
+    localStorage.setItem('thecol_inventaire_seeded', '1');
+    return count;
+};
 
-    // Items en alerte (seuil > 0 et quantite ≤ seuil)
+const renderInventaire = () => {
+    const items = DB.get('inventaire') || [];
+    const premierAffichageVide = items.length === 0 && !localStorage.getItem('thecol_inventaire_seeded');
+    if (premierAffichageVide) {
+        seedDefaultConsommables();
+    }
+    const allItems = DB.get('inventaire') || [];
+    if (allItems.length > 0 && !localStorage.getItem('thecol_inventaire_seeded')) {
+        localStorage.setItem('thecol_inventaire_seeded', '1');
+    }
+    const consommables = allItems.filter(i => i.categorie === 'consommable');
+    const equipement = allItems.filter(i => i.categorie === 'equipement');
+    const defautsManquants = DEFAULT_CONSOMMABLES.filter(d => !consommables.some(i => inventaireNamesMatch(d.nom, i.nom))).length;
+    renderInventaireHTML(consommables, equipement, allItems, defautsManquants);
+};
+
+const renderInventaireHTML = (consommables, equipement, items, defautsManquants = 0) => {
     const alerteCount = items.filter(i => i.seuilAlerte > 0 && i.quantite <= i.seuilAlerte).length;
 
     const renderInvRow = (item, categorie) => {
@@ -4958,10 +5218,19 @@ const renderInventaire = () => {
         <div class="commandes-toolbar">
             <h1>Inventaire</h1>
             <div style="display:flex; gap:8px;">
+                <button class="btn btn-ghost btn-sm" onclick="viderToutInventaire()">Tout supprimer</button>
                 <button class="btn btn-ghost btn-sm" onclick="showInventaireModal('equipement')">+ Équipement</button>
                 <button class="btn btn-primary btn-sm" onclick="showInventaireModal('consommable')">+ Consommable</button>
             </div>
         </div>
+
+        ${items.length === 0 ? `<div class="dash-alert" style="margin-bottom: 14px;">
+            <span class="dash-alert-icon">ℹ️</span>
+            <div class="dash-alert-text">
+                <strong>Inventaire vidé</strong>
+                Les consommables de référence ne sont plus recréés automatiquement après « Tout supprimer » : le bouton « + Recréer les ${DEFAULT_CONSOMMABLES.length} consommables de référence » ci-dessous permet de les restaurer manuellement.
+            </div>
+        </div>` : ''}
 
         ${alerteCount > 0 ? `
             <a href="#inventaire" class="dash-alert" style="margin-bottom: 14px;">
@@ -4976,7 +5245,10 @@ const renderInventaire = () => {
         <div class="inv-section">
             <div class="inv-section-title">
                 <h3>Consommables</h3>
-                <span style="font-size: var(--font-caption); color: var(--text-light);">${consommables.length}</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size: var(--font-caption); color: var(--text-light);">${consommables.length}</span>
+                    ${defautsManquants > 0 ? `<button class="btn btn-sm btn-secondary" onclick="recreerConsommablesManquants()">+ Recréer les ${defautsManquants} consommables de référence</button>` : ''}
+                </div>
             </div>
             ${consommables.length === 0
                 ? '<p style="color: var(--text-light); font-size: var(--font-body); padding: 8px 0;">Aucun consommable</p>'
@@ -5098,6 +5370,29 @@ const deleteInventaireItem = (id) => {
         showToast('Item supprimé');
         renderInventaire();
     });
+};
+
+const viderToutInventaire = () => {
+    confirmDialog('Vider tout l\'inventaire (consommables et équipement) ? Les consommables de référence ne seront pas recréés automatiquement.', { danger: true, confirmLabel: 'Tout vider' }).then(ok => {
+        if (!ok) return;
+        DB.set('inventaire', []);
+        localStorage.setItem('thecol_inventaire_seeded', '1');
+        showToast('Inventaire vidé. Les consommables de référence ne seront pas recréés automatiquement.', 'warning');
+        renderInventaire();
+    });
+};
+
+const recreerConsommablesManquants = () => {
+    const items = DB.get('inventaire') || [];
+    const consommables = items.filter(i => i.categorie === 'consommable');
+    const manquants = DEFAULT_CONSOMMABLES.filter(d => !consommables.some(i => inventaireNamesMatch(d.nom, i.nom)));
+    manquants.forEach(d => {
+        items.push({ ...d, id: generateId(), categorie: 'consommable', quantite: 0 });
+    });
+    DB.set('inventaire', items);
+    localStorage.setItem('thecol_inventaire_seeded', '1');
+    showToast(`${manquants.length} consommable(s) de référence recréé(s)`);
+    renderInventaire();
 };
 
 // Settings
@@ -5337,7 +5632,10 @@ const showEmployeModal = (id = null) => {
                 </div>
             </div>
             <div class="form-row">
-
+                <div class="form-group">
+                    <label>Taux horaire (CHF)</label>
+                    <input type="number" name="tauxHoraire" min="0" step="0.05" value="${emp?.tauxHoraire ?? ''}">
+                </div>
                 <div class="form-group">
                     <label class="checkbox-label">
                         <input type="checkbox" name="actif" ${emp?.actif !== false ? 'checked' : ''}>
@@ -5361,6 +5659,7 @@ const saveEmploye = (event, id) => {
         id: id || generateId(),
         nom: formData.get('nom'),
         prenom: formData.get('prenom'),
+        tauxHoraire: parseFloat(formData.get('tauxHoraire')) || 0,
         actif: form.querySelector('input[name="actif"]').checked
     };
     
@@ -5771,6 +6070,16 @@ const showClientModal = (id = null) => {
             </div>
             <div class="form-row">
                 <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" value="${escapeHtml(client?.email || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Téléphone</label>
+                    <input type="tel" name="telephone" value="${escapeHtml(client?.telephone || '')}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
                     <label>NPA & Localité</label>
                     <input type="text" name="npa" value="${escapeHtml(client?.npa || '')}">
                 </div>
@@ -5837,6 +6146,8 @@ const saveClient = (event, id) => {
         societe: formData.get('societe') || '',
         nom: formData.get('nom') || '',
         adresse: formData.get('adresse') || '',
+        email: formData.get('email') || '',
+        telephone: formData.get('telephone') || '',
         npa: formData.get('npa') || '',
         tarifs: formData.get('tarifs') || '',
         prix25cl: formData.get('prix25cl') || '',
@@ -6075,3 +6386,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     migrateClientTarifs();
     router();
 });
+

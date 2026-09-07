@@ -1,7 +1,7 @@
 // Service worker ThéCol : network-first pour les documents HTML, cache-first pour le statique et les CDN épinglés, réseau seul pour les API Firestore.
 
-const CACHE_NAME = 'thecol-static-v8.7';
-const APP_SHELL = ['./', './index.html', './app.js?v=8.7', './styles.css?v=2.8', './manifest.webmanifest'];
+const CACHE_NAME = 'thecol-static-v8.8';
+const APP_SHELL = ['./', './index.html', './app.js?v=8.8', './styles.css?v=8.8', './manifest.webmanifest'];
 const CDN_HOSTS = ['cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com'];
 const STATIC_REGEX = /\.(js|css|png|ico|svg|webmanifest|xlsx)(\?.*)?$/;
 const HTML_PATH_REGEX = /\/$|\.html$/;
