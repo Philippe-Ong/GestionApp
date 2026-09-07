@@ -75,7 +75,7 @@
             </button>
             <h2 id="pageTitle">Dashboard</h2>
             <div class="header-actions" id="headerActions">
-                <span style="font-size: 11px; color: var(--text-lighter);">v8.6</span>
+                <span style="font-size: 11px; color: var(--text-lighter);">v8.7</span>
                 <button id="syncBtn" class="btn btn-sm btn-secondary" onclick="window.forceFirebaseSync()" style="display:none;">
                     🔄 Sync
                 </button>
@@ -126,8 +126,8 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous"></script>
     <!-- Firebase SDK
          SECURITY: Firebase client keys are public by design. Firestore security rules
          MUST restrict read/write to authenticated users only. Do NOT add server keys here. -->
@@ -162,12 +162,20 @@
             window.firebaseReady = false;
         }
     </script>
-    <script src="app.js?v=8.6"></script>
+    <script src="app.js?v=8.7"></script>
     <script>
         // Backup: show sync button after load
         setTimeout(() => {
             if(window.firebaseReady) window.showSyncButton?.();
         }, 1000);
+    </script>
+    <script>
+        // Enregistrement du service worker pour le mode hors-ligne
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(e => console.error('SW registration failed:', e));
+            });
+        }
     </script>
 </body>
 </html>

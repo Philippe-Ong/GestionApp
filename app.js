@@ -183,9 +183,15 @@ const renderLivraisonsSansBLCard = (commandesLivreesSansBL, lookups) => {
 // Cache pour le modal de commande : evite 2x DB.get par touche dans la matrice
 // (clients, formats, aromes sont stables tant que le modal est ouvert)
 let _commandeModalCache = null;
-const formatDate = (date) => new Date(date).toLocaleDateString('fr-CH');
+// Id de la commande dupliquée en cours d'édition (supprimée si le modal est abandonné)
+let _pendingDuplicateId = null;
+const formatDate = (date) => {
+    if (!date) return '—';
+    const d = new Date(date);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('fr-CH');
+};
 const formatDateTime = (date) => new Date(date).toLocaleString('fr-CH');
-const formatTime = (time) => time.substring(0, 5);
 
 // Parse "HH:MM" → total minutes since midnight, or null if invalid.
 const parseHHMM = (str) => {
@@ -263,7 +269,12 @@ const getNextCommandeNumero = () => {
         const num = parseInt(cmd.numero || '0', 10);
         if (num > maxNum) maxNum = num;
     });
-    return String(maxNum + 1).padStart(5, '0');
+    const meta = DB._readMeta();
+    const persisted = parseInt(meta.lastCommandeNumero || '0', 10);
+    const next = Math.max(persisted, maxNum) + 1;
+    meta.lastCommandeNumero = next;
+    DB._writeMeta(meta);
+    return String(next).padStart(5, '0');
 };
 
 const getCommandeNumero = (commande) => {
@@ -277,7 +288,12 @@ const getNextBLNumero = () => {
         const num = parseInt(liv.numeroBL || '0', 10);
         if (num > maxNum) maxNum = num;
     });
-    return String(maxNum + 1).padStart(5, '0');
+    const meta = DB._readMeta();
+    const persisted = parseInt(meta.lastBLNumero || '0', 10);
+    const next = Math.max(persisted, maxNum) + 1;
+    meta.lastBLNumero = next;
+    DB._writeMeta(meta);
+    return String(next).padStart(5, '0');
 };
 
 const getBLNumero = (livraison) => {
@@ -352,8 +368,42 @@ const displayUnit = (unit) => {
 };
 
 // Data Storage with Firebase sync
+const FIREBASE_FIRESTORE_URL = 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+const compareSyncTimestamps = (cloudT, localT) => {
+    if (!localT) return 'cloud';
+    if (!cloudT) return 'local';
+    if (cloudT === localT) return 'equal';
+    return cloudT > localT ? 'cloud' : 'local';
+};
+
+const delaySyncRetry = (attempt) => new Promise(resolve => setTimeout(resolve, attempt === 2 ? 2000 : 8000));
+
 const DB = {
     firebaseSynced: false,
+
+    _readMeta: () => {
+        try {
+            return JSON.parse(localStorage.getItem('thecol_meta')) || {};
+        } catch (e) {
+            console.error('Error parsing sync meta:', e);
+            return {};
+        }
+    },
+
+    _writeMeta: (meta) => {
+        try {
+            localStorage.setItem('thecol_meta', JSON.stringify(meta));
+        } catch (e) {
+            console.error('Error saving sync meta:', e);
+        }
+    },
+
+    _touchMeta: (key, timestamp) => {
+        const meta = DB._readMeta();
+        meta[key] = timestamp || new Date().toISOString();
+        DB._writeMeta(meta);
+    },
     
     get: (key) => {
         const data = localStorage.getItem('thecol_' + key);
@@ -380,6 +430,7 @@ const DB = {
                 console.error('Error saving data for key ' + key, e);
             }
         }
+        DB._touchMeta(key);
         if (window.firebaseReady && window.firebaseDb) {
             DB.syncToFirebase(key, data);
         }
@@ -390,13 +441,93 @@ const DB = {
     
     syncToFirebase: async (key, data) => {
         if (!window.firebaseReady || !window.firebaseDb) return;
-        try {
-            const { setDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-            await setDoc(doc(window.firebaseDb, 'data', key), { data: data, updatedAt: new Date().toISOString() });
-        } catch(e) {
-            console.error('Firebase sync error:', e);
-            showToast('Synchronisation cloud échouée pour « ' + key + ' » — données enregistrées localement uniquement.', 'error');
+        let lastError = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const { setDoc, doc } = await import(FIREBASE_FIRESTORE_URL);
+                await setDoc(doc(window.firebaseDb, 'data', key), { data: data, updatedAt: new Date().toISOString() });
+                return;
+            } catch (e) {
+                lastError = e;
+                console.error(`Firebase sync error for ${key} (tentative ${attempt}/3):`, e);
+                if (attempt < 3) await delaySyncRetry(attempt);
+            }
         }
+        showToast('Synchronisation cloud échouée pour « ' + key + ' » — données enregistrées localement uniquement.', 'error');
+    },
+    
+    setMany: async (entries) => {
+        Object.keys(entries).forEach(key => {
+            try {
+                localStorage.setItem('thecol_' + key, JSON.stringify(entries[key]));
+            } catch (e) {
+                console.error('Error saving data for key ' + key, e);
+            }
+        });
+        const timestamp = new Date().toISOString();
+        DB._writeManyMeta(entries, timestamp);
+        if (window.firebaseReady && window.firebaseDb) {
+            let lastError = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    const { writeBatch, doc } = await import(FIREBASE_FIRESTORE_URL);
+                    const batch = writeBatch(window.firebaseDb);
+                    Object.keys(entries).forEach(key => {
+                        batch.set(doc(window.firebaseDb, 'data', key), { data: entries[key], updatedAt: timestamp });
+                    });
+                    await batch.commit();
+                    return;
+                } catch (e) {
+                    lastError = e;
+                    console.error(`Firebase batch sync error (tentative ${attempt}/3):`, e);
+                    if (attempt < 3) await delaySyncRetry(attempt);
+                }
+            }
+            showToast('Synchronisation cloud échouée pour plusieurs tables — données enregistrées localement uniquement.', 'error');
+        }
+    },
+    
+    _writeManyMeta: (entries, timestamp) => {
+        const meta = DB._readMeta();
+        Object.keys(entries).forEach(key => {
+            meta[key] = timestamp;
+        });
+        DB._writeMeta(meta);
+    },
+
+    _compareMeta: async () => {
+        if (!window.firebaseReady || !window.firebaseDb) return null;
+        try {
+            const { getDocs, collection } = await import(FIREBASE_FIRESTORE_URL);
+            const snapshot = await getDocs(collection(window.firebaseDb, 'data'));
+            const localEntries = {};
+            const cloudEntries = {};
+            const pendingTables = [];
+            let pendingTableCount = 0;
+            snapshot.forEach(docSnap => {
+                const key = docSnap.id;
+                const cloudData = docSnap.data().data;
+                if (!Array.isArray(cloudData)) return;
+                const cloudTimestamp = docSnap.data().updatedAt;
+                const localTimestamp = DB._readMeta()[key] || null;
+                const isLocalNewer = compareSyncTimestamps(cloudTimestamp, localTimestamp) === 'local';
+                const needsSync = isLocalNewer && (cloudTimestamp || localTimestamp);
+                pendingTableCount += needsSync ? 1 : 0;
+                pendingTables.push({ key, cloudTimestamp, localTimestamp, needsSync });
+            });
+            return { pendingTables, pendingTableCount };
+        } catch (e) {
+            console.error('Firebase meta load error:', e);
+            return null;
+        }
+    },
+
+    _shouldSync: async () => {
+        if (!window.firebaseReady || !window.firebaseDb) return { shouldSync: false };
+        const meta = await DB._compareMeta();
+        if (!meta || meta.pendingTableCount === 0) return { shouldSync: false, meta };
+        const ok = await confirmDialog(`Certaines données locales (${meta.pendingTableCount} table(s)) sont plus récentes que le cloud. Les pousser vers le cloud ?`);
+        return { shouldSync: !!ok, meta };
     },
     
     loadFromFirebase: async (showNotification = true) => {
@@ -412,25 +543,47 @@ const DB = {
             }
             localStorage.setItem('thecol_backup_pre_sync', JSON.stringify(backup));
 
-            const { getDocs, collection } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
+            const { getDocs, collection } = await import(FIREBASE_FIRESTORE_URL);
             const snapshot = await getDocs(collection(window.firebaseDb, 'data'));
             let hasData = false;
+            let localToCloud = 0;
+            let cloudToLocal = 0;
+            const pushAfter = [];
             snapshot.forEach(docSnap => {
                 const key = docSnap.id;
                 const cloudData = docSnap.data().data;
-                if (Array.isArray(cloudData)) {
+                if (!Array.isArray(cloudData)) return;
+                hasData = true;
+                const cloudTimestamp = docSnap.data().updatedAt;
+                const localTimestamp = DB._readMeta()[key] || null;
+                if (compareSyncTimestamps(cloudTimestamp, localTimestamp) === 'local') {
+                    localToCloud++;
+                    pushAfter.push(key);
+                } else {
+                    cloudToLocal++;
                     localStorage.setItem('thecol_' + key, JSON.stringify(cloudData));
-                    hasData = true;
+                    DB._touchMeta(key, cloudTimestamp || new Date().toISOString());
                 }
             });
             if (hasData) {
                 DB.firebaseSynced = true;
-                if (showNotification) showToast('Données synchronisées depuis le cloud');
-            } else if (showNotification) {
-                showToast('Aucune donnée dans le cloud');
+            }
+            for (const key of pushAfter) {
+                const localData = DB.get(key);
+                await DB.syncToFirebase(key, localData);
+            }
+            if (showNotification) {
+                if (cloudToLocal > 0) {
+                    showToast(`${cloudToLocal} table(s) mise(s) à jour depuis le cloud`);
+                } else if (localToCloud > 0) {
+                    showToast('Données locales déjà à jour');
+                } else {
+                    showToast('Aucune donnée dans le cloud');
+                }
             }
         } catch(e) {
             console.error('Firebase load error:', e);
+            showToast('Échec du chargement depuis le cloud', 'error');
         }
     },
     
@@ -465,10 +618,41 @@ const calculateAvailableStock = (lots, referenceDate = new Date()) => {
     return stock;
 };
 
+const restoreBackupPreSync = () => {
+    try {
+        const raw = localStorage.getItem('thecol_backup_pre_sync');
+        if (!raw) {
+            showToast('Aucun backup de synchronisation disponible', 'warning');
+            return;
+        }
+        const backup = JSON.parse(raw);
+        let count = 0;
+        const meta = DB._readMeta();
+        Object.keys(backup).forEach(k => {
+            if (!k.startsWith('thecol_') || k.startsWith('thecol_backup_') || k.startsWith('thecol_filter_') || k.startsWith('thecol_show_') || k === 'thecol_meta') return;
+            localStorage.setItem(k, backup[k]);
+            meta[k.slice('thecol_'.length)] = new Date().toISOString();
+            count++;
+        });
+        DB._writeMeta(meta);
+        showToast(`Backup restauré : ${count} entrée(s) restaurée(s)`, 'success');
+        renderCurrentView();
+    } catch (e) {
+        console.error('Backup restore error:', e);
+        showToast('Échec de la restauration du backup', 'error');
+    }
+};
+window.restoreBackupPreSync = restoreBackupPreSync;
+
 // Manual sync function
 window.forceFirebaseSync = async () => {
     const syncBtn = document.getElementById('syncBtn');
     const restoreBtn = setBusy(syncBtn, 'Sync…');
+    const { shouldSync } = await DB._shouldSync();
+    if (!shouldSync) {
+        restoreBtn();
+        return;
+    }
     modal.show('Synchronisation',
         '<div style="text-align:center; padding: 20px;" aria-busy="true"><p><span class="spinner" aria-hidden="true"></span> Synchronisation en cours avec le Cloud...</p><p>Veuillez patienter.</p></div>',
         '');
@@ -611,6 +795,19 @@ const modal = {
         }
         // Libere le cache snapshot du modal de commande
         if (typeof _commandeModalCache !== 'undefined') _commandeModalCache = null;
+        // Une commande dupliquée jamais finalisée (dateLivraison vide) est retirée à la fermeture
+        if (typeof _pendingDuplicateId !== 'undefined' && _pendingDuplicateId) {
+            const dupId = _pendingDuplicateId;
+            _pendingDuplicateId = null;
+            const commandes = DB.get('commandes');
+            const index = commandes.findIndex(c => c.id === dupId && !c.dateLivraison);
+            if (index !== -1) {
+                commandes.splice(index, 1);
+                DB.set('commandes', commandes);
+                showToast('Duplication annulée', 'warning');
+                renderCommandes();
+            }
+        }
     }
 };
 
@@ -713,7 +910,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // Cross-tab synchronization
 window.addEventListener('storage', (e) => {
     if (!e.key || !e.key.startsWith('thecol_')) return;
-    if (e.key.startsWith('thecol_filter_') || e.key.startsWith('thecol_show_')) return;
+    if (e.key.startsWith('thecol_filter_') || e.key.startsWith('thecol_show_') || e.key === 'thecol_meta') return;
     renderCurrentView();
 });
 
@@ -981,14 +1178,13 @@ const renderStock = () => {
     const formatsActifs = formats.filter(f => f.actif);
 
     const aromaTilesHtml = `
-        <a href="#stock" class="aroma-tile aroma-all ${!savedArome ? 'active' : ''}" onclick="event.preventDefault(); toggleStockAromeFilter(''); return false;">
+        <a href="#stock" class="aroma-tile aroma-all ${!savedArome ? 'active' : ''}" data-arome="">
             <div class="aroma-tile-header"><span class="aroma-tile-dot"></span><span class="aroma-tile-name">Tous</span></div>
             <div class="aroma-tile-value">${sellableBottles}</div>
             <div class="aroma-tile-sub">btl vendables</div>
         </a>
         ${tileAromas.map(a => `
-            <a href="#stock" class="aroma-tile ${savedArome === a.nom ? 'active' : ''}"
-               onclick="event.preventDefault(); toggleStockAromeFilter('${escapeHtml(a.nom)}'); return false;">
+            <a href="#stock" class="aroma-tile ${savedArome === a.nom ? 'active' : ''}" data-arome="${escapeHtml(a.nom)}">
                 <div class="aroma-tile-header">
                     <span class="aroma-tile-dot" style="background:${escapeHtml(a.couleur || '#ccc')}"></span>
                     <span class="aroma-tile-name">${escapeHtml(a.nom)}</span>
@@ -999,9 +1195,9 @@ const renderStock = () => {
         `).join('')}
     `;
 
-    // Pills formats + statuts
-    const fmtPill = (val, label) => `<button type="button" class="status-pill ${savedFormat === val ? 'active' : ''}" onclick="toggleStockFormatFilter('${escapeHtml(val)}')">${escapeHtml(label)}</button>`;
-    const statPill = (val, label) => `<button type="button" class="status-pill ${savedStatut === val ? 'active' : ''}" onclick="toggleStockStatutFilter('${val}')">${escapeHtml(label)}</button>`;
+    // Pills formats + statuts (data-* pour éviter l'injection via onclick inline)
+    const fmtPill = (val, label) => `<button type="button" class="status-pill ${savedFormat === val ? 'active' : ''}" data-format="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
+    const statPill = (val, label) => `<button type="button" class="status-pill ${savedStatut === val ? 'active' : ''}" data-statut="${val}">${escapeHtml(label)}</button>`;
 
     const lotCardsHtml = filteredLots.length === 0
         ? '<div class="commande-empty">Aucun lot ne correspond aux filtres</div>'
@@ -1054,14 +1250,14 @@ const renderStock = () => {
         ${formatsActifs.length > 0 ? `
             <div class="stock-pills-row">
                 <span class="stock-pills-label">Format :</span>
-                <button type="button" class="status-pill ${!savedFormat ? 'active' : ''}" onclick="toggleStockFormatFilter('')">Tous</button>
+                <button type="button" class="status-pill ${!savedFormat ? 'active' : ''}" data-format="">Tous</button>
                 ${formatsActifs.map(f => fmtPill(f.nom, f.nom)).join('')}
             </div>
         ` : ''}
 
         <div class="stock-pills-row">
             <span class="stock-pills-label">DLC :</span>
-            <button type="button" class="status-pill ${!savedStatut ? 'active' : ''}" onclick="toggleStockStatutFilter('')">Tous</button>
+            <button type="button" class="status-pill ${!savedStatut ? 'active' : ''}" data-statut="">Tous</button>
             ${statPill('ok', 'OK')}
             ${statPill('warning', '< 1 mois')}
             ${statPill('expired', 'Expiré')}
@@ -1101,6 +1297,18 @@ const renderStock = () => {
     `;
     
     safeRender(html);
+    document.querySelectorAll('.aroma-tile[data-arome]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            toggleStockAromeFilter(el.dataset.arome);
+        });
+    });
+    document.querySelectorAll('[data-format]').forEach(el => {
+        el.addEventListener('click', () => toggleStockFormatFilter(el.dataset.format));
+    });
+    document.querySelectorAll('[data-statut]').forEach(el => {
+        el.addEventListener('click', () => toggleStockStatutFilter(el.dataset.statut));
+    });
 };
 
 // Debounced search handler — one render per typing pause instead of one per keystroke
@@ -1303,8 +1511,7 @@ const saveLot = (event) => {
             dateAdded: new Date().toISOString()
         });
         
-        DB.set('lots', lots);
-        DB.set('history', history);
+        DB.setMany({ lots: lots, history: history });
         
         modal.hide();
         showToast('Lot créé avec succès');
@@ -1957,40 +2164,6 @@ const saveQuickPointage = (event) => {
     renderPointage('pointage');
 };
 
-const addNewEmployee = () => {
-    const nom = document.getElementById('newEmployeeName').value.trim();
-    const prenom = document.getElementById('newEmployeePrenom').value.trim();
-    
-    if (!nom || !prenom) {
-        showToast('Veuillez entrer nom et prénom', 'error');
-        return;
-    }
-    
-    const employes = DB.get('employees') || [];
-    employes.push({
-        id: generateId(),
-        nom,
-        prenom,
-        actif: true
-    });
-    DB.set('employees', employes);
-    
-    document.getElementById('newEmployeeName').value = '';
-    document.getElementById('newEmployeePrenom').value = '';
-    showToast('Employé ajouté');
-    renderPointage('employes');
-};
-
-const deleteEmployee = (id) => {
-    confirmDialog('Supprimer cet employé ?', { danger: true }).then(ok => {
-        if (!ok) return;
-        const employes = DB.get('employees').filter(e => e.id !== id);
-        DB.set('employees', employes);
-        showToast('Employé supprimé');
-        renderPointage('employes');
-    });
-};
-
 const exportPointageExcel = () => {
     const pointages = DB.get('pointages') || [];
     const employes = DB.get('employees') || [];
@@ -2035,184 +2208,6 @@ const exportPointageExcel = () => {
     link.click();
     
     showToast('Exporté en CSV');
-};
-
-const showPointageModal = (type) => {
-    const employes = DB.get('employees').filter(e => e.actif);
-    
-    if (employes.length === 0) {
-        showToast('Veuillez d\'abord ajouter des employés dans les paramètres', 'error');
-        return;
-    }
-    
-    modal.show(type === 'arrivee' ? 'Pointer arrivée' : 'Pointer départ', `
-        <form id="pointageForm">
-            <div class="form-group">
-                <label>Employé</label>
-                <select name="employeId" required>
-                    ${employes.map(e => `<option value="${e.id}">${escapeHtml(e.prenom + ' ' + e.nom)}</option>`).join('')}
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Date</label>
-                <input type="date" name="date" value="${getLocalDateISOString()}" required>
-            </div>
-            <div class="form-group">
-                <label>Heure</label>
-                <input type="time" name="heure" value="" required>
-            </div>
-            <div class="form-group">
-                <label>Pause (minutes)</label>
-                <input type="number" name="pause" value="0" min="0">
-            </div>
-        </form>
-    `, `
-        <button class="btn btn-secondary" onclick="modal.hide()">Annuler</button>
-        <button class="btn btn-primary" onclick="savePointage(event, '${type}')">Valider</button>
-    `);
-};
-
-const showSaisieManuelleModal = () => {
-    const employes = DB.get('employees').filter(e => e.actif);
-    
-    if (employes.length === 0) {
-        showToast('Veuillez d\'abord ajouter des employés dans les paramètres', 'error');
-        return;
-    }
-    
-    modal.show('Saisie manuelle des heures', `
-        <form id="saisieManuelleForm">
-            <div class="form-group">
-                <label>Employé</label>
-                <select name="employeId" required>
-                    ${employes.map(e => `<option value="${e.id}">${escapeHtml(e.prenom + ' ' + e.nom)}</option>`).join('')}
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Date</label>
-                <input type="date" name="date" value="${getLocalDateISOString()}" required>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Heure de début</label>
-                    <input type="time" name="heureDebut" required>
-                </div>
-                <div class="form-group">
-                    <label>Heure de fin</label>
-                    <input type="time" name="heureFin" required>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Pause (minutes)</label>
-                <input type="number" name="pause" value="0" min="0">
-            </div>
-        </form>
-    `, `
-        <button class="btn btn-secondary" onclick="modal.hide()">Annuler</button>
-        <button class="btn btn-primary" onclick="saveSaisieManuelle(event)">Enregistrer</button>
-    `);
-};
-
-const saveSaisieManuelle = (event) => {
-    const reenable = disableSaveBtn(event);
-    const form = document.getElementById('saisieManuelleForm');
-    const formData = new FormData(form);
-    
-    const employeId = formData.get('employeId');
-    const date = formData.get('date');
-    const heureDebut = formData.get('heureDebut');
-    const heureFin = formData.get('heureFin');
-    const pause = parseInt(formData.get('pause')) || 0;
-    
-    if (!employeId || !date || !heureDebut || !heureFin) {
-        showToast('Veuillez remplir tous les champs', 'error');
-        if (reenable) reenable();
-        return;
-    }
-    if (parseHHMM(heureDebut) === null || parseHHMM(heureFin) === null) {
-        showToast('Format d\'heure invalide (attendu HH:MM)', 'error');
-        if (reenable) reenable();
-        return;
-    }
-    if (parseHHMM(heureFin) <= parseHHMM(heureDebut)) {
-        showToast('L\'heure de fin doit être après l\'heure de début', 'error');
-        if (reenable) reenable();
-        return;
-    }
-
-    const pointages = DB.get('pointages');
-
-    // Check if there's already a pointage for this employee on this date
-    let pointage = pointages.find(p => p.employeId === employeId && p.date === date);
-    
-    if (pointage) {
-        pointage.heureDebut = heureDebut;
-        pointage.heureFin = heureFin;
-        pointage.pause = pause;
-    } else {
-        pointage = {
-            id: generateId(),
-            employeId,
-            date,
-            heureDebut,
-            heureFin,
-            pause
-        };
-        pointages.push(pointage);
-    }
-    
-    DB.set('pointages', pointages);
-    modal.hide();
-    showToast('Heures enregistrées');
-    renderPointage();
-};
-
-const savePointage = (event, type) => {
-    const reenable = disableSaveBtn(event);
-    try {
-        const form = document.getElementById('pointageForm');
-        if (!form) return;
-        const formData = new FormData(form);
-        const employeId = formData.get('employeId');
-        const date = formData.get('date');
-        const heure = formData.get('heure');
-        
-        if (!employeId || !date || !heure) {
-            showToast('Veuillez remplir tous les champs', 'error');
-            return;
-        }
-        
-        const pointages = DB.get('pointages');
-        
-        let pointage = pointages.find(p => p.employeId === employeId && p.date === date);
-        
-        if (!pointage) {
-            pointage = {
-                id: generateId(),
-                employeId,
-                date,
-                pause: parseInt(formData.get('pause'), 10) || 0
-            };
-            pointages.push(pointage);
-        }
-        
-        if (type === 'arrivee') {
-            pointage.heureDebut = heure;
-        } else {
-            pointage.heureFin = heure;
-            pointage.pause = parseInt(formData.get('pause'), 10) || 0;
-        }
-        
-        DB.set('pointages', pointages);
-        modal.hide();
-        showToast(type === 'arrivee' ? 'Arrivée pointée' : 'Départ pointé');
-        renderPointage();
-    } catch (e) {
-        console.error('Error saving pointage:', e);
-        showToast('Erreur lors du pointage', 'error');
-    } finally {
-        if (reenable) reenable();
-    }
 };
 
 const deletePointage = (id) => {
@@ -2587,6 +2582,23 @@ const togglePillStatut = (statut) => {
     renderCommandes();
 };
 
+// Transitions de statut autorisées pour les commandes. La livraison passe
+// uniquement par le flux dédié (showLivraisonBouteillesModal) qui déduit le stock,
+// et la restauration d'une commande livrée uniquement par restaurerCommande
+// (qui recrédite le stock). Le sélecteur n'expose jamais ces deux flux.
+const STATUT_TRANSITIONS = {
+    'en_attente': ['en_attente', 'produite', 'annulee'],
+    'produite': ['produite', 'livrée', 'annulee'],
+    'livrée': ['livrée', 'produite'],
+    'annulee': ['annulee']
+};
+const STATUT_LABELS = { 'en_attente': 'En attente', 'produite': 'Produite', 'livrée': 'Livrée', 'annulee': 'Annulée' };
+const isTransitionAllowed = (from, to) => {
+    if (!from) return true;
+    const allowed = STATUT_TRANSITIONS[from];
+    return Array.isArray(allowed) && allowed.includes(to);
+};
+
 const showCommandeModal = (id = null) => {
     const clients = getActive('clients');
     const aromes = getActive('aromes');
@@ -2665,10 +2677,15 @@ const showCommandeModal = (id = null) => {
             <div class="form-group" style="margin-top: 16px;">
                 <label>Statut</label>
                 <select name="statut">
-                    <option value="en_attente" ${commande?.statut === 'en_attente' ? 'selected' : ''}>En attente</option>
-                    <option value="produite" ${commande?.statut === 'produite' ? 'selected' : ''}>Produite</option>
-                    <option value="livrée" ${commande?.statut === 'livrée' ? 'selected' : ''}>Livrée</option>
-                    <option value="annulee" ${commande?.statut === 'annulee' ? 'selected' : ''}>Annulée</option>
+                    ${(() => {
+                        if (commande) {
+                            const allowed = (STATUT_TRANSITIONS[commande.statut] || [commande.statut])
+                                .filter(s => s !== 'livrée' || commande.statut === 'livrée');
+                            return allowed.map(s => `<option value="${s}" ${commande.statut === s ? 'selected' : ''}>${STATUT_LABELS[s] || s}</option>`).join('');
+                        }
+                        return `<option value="en_attente" selected>${STATUT_LABELS['en_attente']}</option>
+                                <option value="produite">${STATUT_LABELS['produite']}</option>`;
+                    })()}
                 </select>
             </div>
         </form>
@@ -2748,6 +2765,18 @@ const saveCommande = (event, id) => {
             return;
         }
         
+        const statutChoisi = formData.get('statut');
+        const commandesExistantes = DB.get('commandes');
+        const commandeExistante = id ? commandesExistantes.find(c => c.id === id) : null;
+        if (commandeExistante && !isTransitionAllowed(commandeExistante.statut, statutChoisi)) {
+            showToast('Transition de statut non autorisée', 'error');
+            return;
+        }
+        if (!commandeExistante && !['en_attente', 'produite'].includes(statutChoisi)) {
+            showToast('Statut initial non autorisé', 'error');
+            return;
+        }
+        
         const clientId = formData.get('clientId');
         if (!clientId) {
             showToast('Veuillez sélectionner un client', 'error');
@@ -2766,10 +2795,10 @@ const saveCommande = (event, id) => {
             clientId,
             dateCommande: id ? DB.get('commandes').find(c => c.id === id)?.dateCommande : getLocalDateISOString(),
             dateLivraison,
-            statut: formData.get('statut'),
+            statut: statutChoisi,
             items
         };
-        
+
         const commandes = DB.get('commandes');
         if (id) {
             const index = commandes.findIndex(c => c.id === id);
@@ -2782,7 +2811,10 @@ const saveCommande = (event, id) => {
             commandes.push(commande);
         }
         DB.set('commandes', commandes);
-        
+
+        // La copie dupliquée est confirmée → on oublie l'id en attente de suppression
+        if (_pendingDuplicateId === commande.id) _pendingDuplicateId = null;
+
         modal.hide();
         showToast('Commande enregistrée');
         renderCommandes();
@@ -2796,118 +2828,63 @@ const saveCommande = (event, id) => {
 
 const editCommande = (id) => showCommandeModal(id);
 
-const showStatusDropdown = (event, id) => {
-    event.stopPropagation();
-    document.querySelectorAll('.status-dropdown.active').forEach(d => {
-        if (d.id !== 'statusDropdown-' + id) {
-            d.classList.remove('active');
-            d.previousElementSibling?.setAttribute('aria-expanded', 'false');
-        }
-    });
-    const dropdown = document.getElementById('statusDropdown-' + id);
-    if (!dropdown) return;
-    const isOpen = dropdown.classList.toggle('active');
-    if (event.currentTarget && event.currentTarget.setAttribute) {
-        event.currentTarget.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    }
-};
-
 const updateCommandeStatut = (id, statut) => {
     const commandes = DB.get('commandes');
     const index = commandes.findIndex(c => c.id === id);
-    if (index !== -1) {
-        commandes[index].statut = statut;
-        DB.set('commandes', commandes);
-        document.querySelectorAll('.status-dropdown.active').forEach(d => d.classList.remove('active'));
-        renderCommandes();
+    if (index === -1) return;
+    const from = commandes[index].statut;
+    if (!isTransitionAllowed(from, statut)) {
+        console.error(`Transition interdite: ${from} -> ${statut}`);
+        showToast('Transition de statut non autorisée', 'error');
+        return;
     }
-};
-
-const livrerCommande = (id) => {
-    const commandes = DB.get('commandes');
-    let lots = DB.get('lots') || [];
-    const aromes = DB.get('aromes');
-    const formats = DB.get('formats');
-    
-    const cmdIndex = commandes.findIndex(c => c.id === id);
-    if (cmdIndex === -1) return;
-    
-    const cmd = commandes[cmdIndex];
-    
-    // Normaliser les noms pour comparaison (minuscules, sans espaces)
-    const normalize = (s) => (s || '').toString().toLowerCase().trim();
-    
-    // FIFO: trier lots par date de production (plus ancien primero)
-    const sortedLots = [...lots].sort((a, b) => 
-        new Date(a.dateProduction || '1970-01-01') - new Date(b.dateProduction || '1970-01-01')
-    );
-    
-    let totalDeducted = 0;
-    const lotsUtilises = [];
-
-    getItems(cmd).forEach(item => {
-        const arome = aromes.find(a => a.id === item.aromeId);
-        const format = formats.find(f => f.id === item.formatId);
-        const aromeNom = normalize(arome?.nom || item.aromeId);
-        const formatNom = normalize(format?.nom || item.formatId);
-        
-        let qtyToDeduct = item.quantite;
-        
-        for (let lot of sortedLots) {
-            if (normalize(lot.arome) === aromeNom && normalize(lot.format) === formatNom && lot.quantite > 0) {
-                const qtyTaken = Math.min(lot.quantite, qtyToDeduct);
-                lotsUtilises.push({
-                    lotId: lot.id,
-                    arome: lot.arome,
-                    format: lot.format,
-                    quantite: qtyTaken
-                });
-                
-                lot.quantite -= qtyTaken;
-                totalDeducted += qtyTaken;
-                qtyToDeduct -= qtyTaken;
-                
-                if (qtyToDeduct <= 0) break;
-            }
-        }
-    });
-    
-    // Mettre à jour les lots dans la base
-    lots = sortedLots.map(l => l).filter(l => l.quantite > 0);
-    DB.set('lots', lots);
-    
-    // Stocker les lots utilisés dans la commande
-    commandes[cmdIndex].lotsUtilises = lotsUtilises;
+    commandes[index].statut = statut;
     DB.set('commandes', commandes);
-    
-    // Mettre à jour le statut
-    updateCommandeStatut(id, 'livrée');
-    showToast(`Commande livrée - ${totalDeducted} bouteille(s) déduite(s) du stock`);
-    
-    // Proposer de générer un bulletin de livraison
-    confirmDialog('Générer un bulletin de livraison maintenant ?').then(ok => {
-        if (!ok) return;
-        const livraison = generateBL(id);
-        if (livraison) {
-            showToast(`BL-${getBLNumero(livraison)} créé`);
-            exportBLExcel(livraison.id);
-        }
-    });
-};
-
-const archiverCommande = (id) => {
-    confirmDialog('Archiver cette commande ? Elle sera déplacée vers les archives.').then(ok => {
-        if (!ok) return;
-        showToast('Commande archivée');
-        renderCommandes();
-    });
+    renderCommandes();
 };
 
 const restaurerCommande = (id) => {
-    confirmDialog('Restaurer cette commande ? Elle redeviendra "produite".').then(ok => {
+    const commande = DB.get('commandes').find(c => c.id === id);
+    if (!commande) return;
+    const lotsUtilises = Array.isArray(commande.lotsUtilises) ? commande.lotsUtilises : [];
+    const hasLots = lotsUtilises.length > 0;
+    const hasBL = (DB.get('livraisons') || []).some(l => l.commandeId === id);
+    const totalRestitue = lotsUtilises.reduce((s, l) => s + (l.quantite || 0), 0);
+    let message = 'Restaurer cette commande ? Elle redeviendra "produite".';
+    if (hasLots) {
+        message = `Restaurer cette commande ? Elle redeviendra "produite" et ${totalRestitue} bouteille(s) seront recréditée(s) au stock.`;
+        if (hasBL) {
+            message += ' Attention : le BL émis pour cette commande reste en base.';
+        }
+    }
+    confirmDialog(message).then(ok => {
         if (!ok) return;
-        updateCommandeStatut(id, 'produite');
-        showToast('Commande restaurée');
+        if (hasLots) {
+            const lots = DB.get('lots') || [];
+            lotsUtilises.forEach(entree => {
+                const existing = lots.find(l => l.id === entree.lotId);
+                if (existing) {
+                    existing.quantite = (existing.quantite || 0) + entree.quantite;
+                } else {
+                    const lot = { arome: entree.arome, format: entree.format, quantite: entree.quantite };
+                    if (entree.dateProduction) lot.dateProduction = entree.dateProduction;
+                    if (entree.dlc) lot.dlc = entree.dlc;
+                    lots.push({ id: entree.lotId || generateId(), ...lot });
+                }
+            });
+            const commandes = DB.get('commandes');
+            const cmdIndex = commandes.findIndex(c => c.id === id);
+            if (cmdIndex !== -1) {
+                commandes[cmdIndex].statut = 'produite';
+                delete commandes[cmdIndex].lotsUtilises;
+                DB.setMany({ lots: lots, commandes: commandes });
+                renderCommandes();
+            }
+            showToast(`${totalRestitue} bouteille(s) recréditée(s) au stock`);
+        } else {
+            updateCommandeStatut(id, 'produite');
+            showToast('Commande restaurée');
+        }
     });
 };
 
@@ -3056,15 +3033,18 @@ const showLivraisonBouteillesModal = (commandeId) => {
         });
 
         allLots = allLots.filter(l => l.quantite > 0);
-        DB.set('lots', allLots);
 
         const cmdIndex = commandes.findIndex(c => c.id === commandeId);
         if (cmdIndex !== -1) {
             commandes[cmdIndex].lotsUtilises = lotsUtilises;
-            DB.set('commandes', commandes);
+            commandes[cmdIndex].statut = 'livrée';
+            DB.setMany({ lots: allLots, commandes: commandes });
+            renderCommandes();
+        } else {
+            DB.set('lots', allLots);
+            updateCommandeStatut(commandeId, 'livrée');
         }
 
-        updateCommandeStatut(commandeId, 'livrée');
         modal.hide();
 
         confirmDialog('Générer un bulletin de livraison maintenant ?').then(ok => {
@@ -3105,60 +3085,6 @@ const showLivraisonBouteillesModal = (commandeId) => {
     });
 
     document.getElementById('confirm-livraison-btn')?.addEventListener('click', validateAndDeliver);
-};
-
-document.addEventListener('click', () => {
-    document.querySelectorAll('.status-dropdown.active').forEach(d => {
-        d.classList.remove('active');
-        d.previousElementSibling?.setAttribute('aria-expanded', 'false');
-    });
-});
-
-const checkStockAndUpdateCommandes = () => {
-    const commandes = DB.get('commandes');
-    const lots = DB.get('lots') || [];
-    const formats = DB.get('formats');
-    const aromes = DB.get('aromes');
-    const now = new Date();
-    
-    const stockDisponible = calculateAvailableStock(lots, now);
-    
-    let updatedCount = 0;
-    const updatedCommandes = commandes.map(cmd => {
-        if (cmd.statut !== 'en_attente') return cmd;
-        
-        const needed = {};
-        getItems(cmd).forEach(item => {
-            const format = formats.find(f => f.id === item.formatId);
-            const arome = aromes.find(a => a.id === item.aromeId);
-            const aromeName = arome?.nom || item.aromeId;
-            const formatName = format?.nom || item.formatId;
-            const key = `${aromeName}-${formatName}`;
-            if (!needed[key]) needed[key] = 0;
-            needed[key] += item.quantite;
-        });
-        
-        let canProduce = true;
-        Object.entries(needed).forEach(([key, qty]) => {
-            const disponible = stockDisponible[key] || 0;
-            if (disponible < qty) canProduce = false;
-        });
-        
-        if (canProduce) {
-            updatedCount++;
-            return { ...cmd, statut: 'produite' };
-        }
-        return cmd;
-    });
-    
-    DB.set('commandes', updatedCommandes);
-    renderCommandes();
-    
-    if (updatedCount > 0) {
-        showToast(`${updatedCount} commande(s) mise(s) en production`);
-    } else {
-        showToast('Aucune commande à mettre en production');
-    }
 };
 
 const showCommandeDetails = (id) => {
@@ -3382,17 +3308,8 @@ const duplicateCommande = (id) => {
     DB.set('commandes', commandes);
     modal.hide();
     showToast(`Commande dupliquée → #${copy.numero}`);
+    _pendingDuplicateId = copy.id;
     showCommandeModal(copy.id);
-};
-
-const deleteCommande = (id) => {
-    confirmDialog('Êtes-vous sûr de vouloir supprimer cette commande ?', { danger: true }).then(ok => {
-        if (!ok) return;
-        const commandes = DB.get('commandes').filter(c => c.id !== id);
-        DB.set('commandes', commandes);
-        showToast('Commande supprimée');
-        renderCommandes();
-    });
 };
 
 const toggleArchives = () => {
@@ -3406,6 +3323,18 @@ const toggleArchives = () => {
 };
 
 // Archives
+const getArchiveFilteredCommandes = () => {
+    const savedFilterYear = DB.getFilter('archive_year');
+    const savedFilterClient = DB.getFilter('archive_client');
+    return DB.get('commandes').filter(c => {
+        if (c.statut !== 'livrée') return false;
+        const year = c.dateCommande ? c.dateCommande.substring(0, 4) : '2024';
+        const matchesYear = !savedFilterYear || year === savedFilterYear;
+        const matchesClient = !savedFilterClient || c.clientId === savedFilterClient;
+        return matchesYear && matchesClient;
+    });
+};
+
 const renderArchives = () => {
     const savedFilterYear = DB.getFilter('archive_year');
     const savedFilterClient = DB.getFilter('archive_client');
@@ -3422,12 +3351,7 @@ const renderArchives = () => {
 
     const years = [...new Set(commandes.map(c => c.dateCommande ? c.dateCommande.substring(0, 4) : '2024'))].sort().reverse();
 
-    const filteredCommandes = commandes.filter(c => {
-        const year = c.dateCommande ? c.dateCommande.substring(0, 4) : '2024';
-        const matchesYear = !savedFilterYear || year === savedFilterYear;
-        const matchesClient = !savedFilterClient || c.clientId === savedFilterClient;
-        return matchesYear && matchesClient;
-    });
+    const filteredCommandes = getArchiveFilteredCommandes();
     
     let html = `
         <div class="card">
@@ -3498,13 +3422,13 @@ const renderArchives = () => {
 };
 
 const exportArchivesExcel = async () => {
-    const commandes = DB.get('commandes').filter(c => c.statut === 'livrée');
+    const commandes = getArchiveFilteredCommandes();
     const clients = DB.get('clients') || [];
     const aromes = DB.get('aromes') || [];
     const formats = DB.get('formats') || [];
 
     if (commandes.length === 0) {
-        showToast('Aucune commande livrée à exporter', 'error');
+        showToast('Aucune commande livrée ne correspond aux filtres', 'error');
         return;
     }
     if (typeof XLSX === 'undefined') {
@@ -4959,9 +4883,7 @@ const validerProduction = (event, encodedAromeNom, cuveIndex) => {
             });
         });
 
-        DB.set('inventaire', inventaire);
-        DB.set('lots', lots);
-        DB.set('history', history);
+        DB.setMany({ inventaire: inventaire, lots: lots, history: history });
 
         modal.hide();
         showToast(`Production confirmée: ${totalBouteilles} bouteille(s) ajoutée(s) au stock`);
@@ -5153,18 +5075,6 @@ const saveInventaireItem = (event, id) => {
     renderInventaire();
 };
 
-// Debounce Firebase sync for inventaire stepper — rapid +/- clicks coalesce into one write per burst.
-// localStorage is always written immediately (sync, cheap) so the data is never lost on navigation.
-let inventaireSyncTimer = null;
-let inventaireSyncPending = null;
-const flushInventaireSync = () => {
-    if (inventaireSyncPending) {
-        DB.syncToFirebase('inventaire', inventaireSyncPending);
-        inventaireSyncPending = null;
-    }
-    inventaireSyncTimer = null;
-};
-
 // Update inventaire quantity
 const updateInventaireQty = (id, delta) => {
     const items = DB.get('inventaire');
@@ -5176,19 +5086,7 @@ const updateInventaireQty = (id, delta) => {
     const qtyEl = document.getElementById('inv-qty-' + id);
     if (qtyEl) qtyEl.firstChild.nodeValue = newQty;
 
-    try {
-        localStorage.setItem('thecol_inventaire', JSON.stringify(items));
-    } catch (e) {
-        if (e.name === 'QuotaExceededError' || e.code === 22) {
-            showToast('Stockage local plein.', 'warning');
-        } else {
-            console.error('inventaire localStorage error', e);
-        }
-    }
-
-    inventaireSyncPending = items;
-    if (inventaireSyncTimer) clearTimeout(inventaireSyncTimer);
-    inventaireSyncTimer = setTimeout(flushInventaireSync, 500);
+    DB.set('inventaire', items);
 };
 
 // Delete inventaire item
@@ -5279,9 +5177,10 @@ const renderParametres = () => {
                     <button class="btn btn-primary" onclick="exportAllData()">💾 Sauvegarder tout (JSON)</button>
                     <button class="btn btn-secondary" onclick="document.getElementById('importDataFile').click()">📂 Restaurer depuis JSON</button>
                     <input type="file" id="importDataFile" accept=".json" style="display:none" onchange="importAllData(event)">
+                    <button class="btn btn-ghost btn-sm" onclick="restoreBackupPreSync()">↩ Restaurer le backup de sync</button>
                 </div>
                 <p class="text-muted" style="font-size: 12px; padding: 0 12px 12px;">
-                    La sauvegarde inclut: employés, aromes, formats, recettes, clients, lots, commandes et pointages.
+                    La sauvegarde inclut: employés, aromes, formats, recettes, clients, lots, commandes et pointages. Le backup de sync est l'état local précédant la dernière synchronisation cloud.
                 </p>
             </div>
             
@@ -5413,7 +5312,11 @@ const updateSettingsCard = (cardName, html) => {
 
 // Settings - Counters
 const resetCounters = () => {
-    showToast('Les compteurs sont maintenant calculés dynamiquement depuis les données existantes');
+    const meta = DB._readMeta();
+    delete meta.lastCommandeNumero;
+    delete meta.lastBLNumero;
+    DB._writeMeta(meta);
+    showToast('Compteurs réinitialisés : numéros recalculés depuis les données existantes');
 };
 
 // Settings - Employes
